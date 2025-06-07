@@ -14,6 +14,12 @@ echo "RAILWAY_PUBLIC_DOMAIN=$RAILWAY_PUBLIC_DOMAIN"
 echo "ALLOWED_HOSTS=$ALLOWED_HOSTS"
 echo "======================================"
 
+# Ensure DJANGO_SETTINGS_MODULE is set
+if [ -z "$DJANGO_SETTINGS_MODULE" ]; then
+  echo "DJANGO_SETTINGS_MODULE is not set! Setting it to afyaflow_auth.settings"
+  export DJANGO_SETTINGS_MODULE=afyaflow_auth.settings
+fi
+
 # Check if Gunicorn will be able to find the wsgi.py file
 echo "Checking for WSGI file..."
 if [ -f /app/afyaflow_auth/wsgi.py ]; then
@@ -65,6 +71,16 @@ else:
     print('Admin user already exists')
 "
 
-echo "Starting web server with command: $@"
-# Execute the command (most likely from Procfile)
-exec "$@" 
+# Determine the port number (default to 8000 if not provided)
+PORT=${PORT:-8000}
+echo "PORT is set to: $PORT"
+
+# Check if any arguments were passed to the script
+if [ $# -eq 0 ]; then
+    echo "No command specified, running gunicorn by default..."
+    echo "Starting gunicorn on port $PORT"
+    exec gunicorn --workers=2 --timeout=120 --bind=0.0.0.0:$PORT afyaflow_auth.wsgi:application --log-file=-
+else
+    echo "Starting web server with command: $@"
+    exec "$@"
+fi 
