@@ -1,4 +1,5 @@
 import os
+import dj_database_url
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -14,7 +15,12 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-default-key-change-
 
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '127.0.0.1,localhost').split(',')
+
+# A list of trusted origins for unsafe requests (e.g., POST).
+# This is a security measure to prevent CSRF attacks.
+csrf_origins_str = os.getenv('CSRF_TRUSTED_ORIGINS', '')
+CSRF_TRUSTED_ORIGINS = [origin for origin in csrf_origins_str.split(',') if origin]
 
 # Application definition
 INSTALLED_APPS = [
@@ -23,6 +29,7 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
+    'whitenoise.runserver_nostatic', # Should be placed after staticfiles
     'django.contrib.staticfiles',
     'django.contrib.sites',
     # Third party apps
@@ -84,6 +91,10 @@ DATABASES = {
     }
 }
 
+# In production, Railway provides a DATABASE_URL environment variable.
+if 'DATABASE_URL' in os.environ:
+    DATABASES['default'] = dj_database_url.config(conn_max_age=600, ssl_require=True)
+
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -112,6 +123,11 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STORAGES = {
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 # Graphene-Django settings
 GRAPHENE = {
@@ -134,6 +150,7 @@ AUTHENTICATION_BACKENDS = [
 SITE_ID = 1
 
 # Allauth settings
+ACCOUNT_LOGIN_METHODS = ['email'] # Replaces deprecated ACCOUNT_AUTHENTICATION_METHOD
 ACCOUNT_AUTHENTICATION_METHOD = 'email' # Explicitly set to email
 ACCOUNT_SIGNUP_FIELDS = ['email'] # For programmatic use
 ACCOUNT_EMAIL_VERIFICATION = 'optional' 

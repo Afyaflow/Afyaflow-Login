@@ -7,7 +7,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 # Import your federated schema
 # Adjust 'users.schema' to the actual Python path of your schema file and variable
-from users.schema import schema as users_federated_schema # Renaming to avoid potential name clashes
+from users.graphql.schema import schema as users_federated_schema # Renaming to avoid potential name clashes
 
 urlpatterns = [
     path('admin/', admin.site.urls),

@@ -1,0 +1,1 @@
+web: gunicorn afyaflow_auth.wsgi --log-file - 
