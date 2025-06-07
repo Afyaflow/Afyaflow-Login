@@ -1,4 +1,4 @@
-# Use Python 3.11 slim image
+
 FROM python:3.11-slim
 
 # Set environment variables
@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y \
     netcat-traditional \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first to leverage Docker cache
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -31,8 +31,7 @@ RUN chmod +x docker-entrypoint.sh
 RUN useradd -m appuser && chown -R appuser:appuser /app
 USER appuser
 
-# Expose port
+
 EXPOSE 8000
 
-# Set entrypoint
 ENTRYPOINT ["./docker-entrypoint.sh"] 

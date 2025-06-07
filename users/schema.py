@@ -5,10 +5,13 @@ from .authentication import create_token
 from .serializers import UserRegistrationSerializer, UserProfileSerializer, ChangePasswordSerializer, MFASetupSerializer
 from django.contrib.auth import authenticate, login as django_login # Renamed to avoid conflict
 from django.utils import timezone # For updating last_login
-import requests # For making HTTP requests to other services
+import requests # For making HTTP requests to other services - will be mostly removed for federation
 from django.conf import settings # To get ORGANIZATION_SERVICE_URL
 import pyotp # For MFA
 import logging # Re-add logging
+
+# Federation imports
+from graphene_federation import LATEST_VERSION, build_schema, key, external
 
 # Allauth imports
 from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
@@ -18,6 +21,7 @@ from allauth.socialaccount.helpers import complete_social_login, render_authenti
 from allauth.exceptions import ImmediateHttpResponse
 from django.http import HttpRequest # For creating a request object for allauth
 
+@key(fields="id")
 class UserType(DjangoObjectType):
     """GraphQL type for the User model, representing a healthcare professional or system user."""
     class Meta:
@@ -38,21 +42,41 @@ class UserType(DjangoObjectType):
         description = "Represents a user within the Afyaflow system."
         # You can also use exclude = ("password", "other_sensitive_fields")
 
-class OrganizationContextType(graphene.ObjectType):
-    id = graphene.UUID(description="The unique identifier of the organization.")
-    name = graphene.String(description="The name of the organization.")
-    slug = graphene.String(description="The URL-friendly slug of the organization.")
-    user_role_in_org = graphene.String(description="User's role in this specific organization (e.g., ADMIN, MEMBER).")
-    
-    class Meta:
-        description = "Basic context of the organization selected or relevant during login."
+    @classmethod
+    def __resolve_reference(cls, info, **data):
+        user_id = data.get('id')
+        if user_id is None:
+            return None
+        try:
+            return User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return None
+
+@key(fields="id", resolvable=False) # This subgraph cannot resolve an Organization by its ID alone
+class OrganizationStub(graphene.ObjectType):
+    """Represents an Organization entity, resolved by the Organization subgraph."""
+    id = graphene.UUID(required=True, description="The unique identifier of the organization.")
+    # The fields below were removed because they are not used by any federation
+    # directives (@key, @provides, @requires) in this subgraph. The gateway will
+    # fetch them directly from the Organization service based on the 'id'.
+    # This resolves the `EXTERNAL_UNUSED` build error.
+    # name = external(graphene.String(description="The name of the organization."))
+    # slug = external(graphene.String(description="The URL-friendly slug of the organization."))
+    # user_role_in_org = external(graphene.String(description="User's role in this specific organization (e.g., ADMIN, MEMBER)."))
+
+    @classmethod
+    def __resolve_reference(cls, info, **data):
+        # This stub is primarily for linking. The actual data is resolved by the Organization service.
+        # We just construct an instance with the provided ID.
+        # The gateway uses the @key to fetch full details from the owning service.
+        return OrganizationStub(id=data.get('id'))
 
 class AuthPayloadType(graphene.ObjectType):
     """Payload returned after successful authentication (login or register)."""
     user = graphene.Field(UserType, description="The authenticated user object.")
     access_token = graphene.String(name="accessToken", description="JWT access token for authenticated requests.")
     refresh_token = graphene.String(name="refreshToken", description="JWT refresh token to obtain new access tokens.")
-    organization_context = graphene.Field(OrganizationContextType, name="organizationContext", required=False, description="Context of the organization if specified and validated during login.")
+    organization_context = graphene.Field(OrganizationStub, name="organizationContext", required=False, description="Context of the organization if specified. Resolved by the Organization service.")
     errors = graphene.List(graphene.String, description="List of error messages if any operation within the mutation fails.") # Added to Login, Register
 
 # We will add Queries and Mutations here later
@@ -180,72 +204,38 @@ class LoginMutation(graphene.Mutation):
         mutation_errors = []
 
         if organization_id:
-            org_service_url = getattr(settings, 'ORGANIZATION_SERVICE_URL', None)
-            if not org_service_url:
-                mutation_errors.append("Organization service URL is not configured.")
-            else:
-                query = """
-                    query GetMembershipDetails($userId: String!, $organizationId: String!) {
-                        organizationMembership(where: { userId_organizationId: { userId: $userId, organizationId: $organizationId }}) {
-                            isActive
-                            role
-                            organization {
-                                id
-                                name
-                                slug
-                            }
-                        }
-                    }
-                """
-                variables = {
-                    "userId": str(user.id),
-                    "organizationId": str(organization_id)
-                }
-                try:
-                    response = requests.post(
-                        org_service_url,
-                        json={'query': query, 'variables': variables},
-                        headers={'Content-Type': 'application/json'}
-                    )
-                    response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
-                    
-                    data = response.json()
-                    
-                    if data.get("errors"):
-                        for error in data.get("errors", []):
-                            mutation_errors.append(f"Organization service error: {error.get('message', 'Unknown error')}")
-                    elif data.get("data") and data["data"].get("organizationMembership"):
-                        membership = data["data"]["organizationMembership"]
-                        if membership.get("isActive"):
-                            org_details = membership.get("organization")
-                            if org_details:
-                                org_context_instance = OrganizationContextType(
-                                    id=org_details.get("id"),
-                                    name=org_details.get("name"),
-                                    slug=org_details.get("slug"),
-                                    user_role_in_org=membership.get("role")
-                                )
-                            else:
-                                mutation_errors.append("Organization details not found in membership.")
-                        else:
-                            mutation_errors.append("User membership in the specified organization is not active.")
-                    else:
-                        mutation_errors.append("User not found in the specified organization or membership is inactive.")
-                        
-                except requests.exceptions.RequestException as e:
-                    mutation_errors.append(f"Could not connect to organization service: {str(e)}")
-                except ValueError: # Includes JSONDecodeError
-                    mutation_errors.append("Invalid response from organization service.")
+            # In a federated setup, the auth service doesn't call the org service directly like this.
+            # It provides the organization_id, and the gateway resolves the OrganizationStub
+            # by querying the Organization service.
+            # We'll create a stub here. Validation of membership might occur in the org service
+            # when it resolves the entity, or through other means.
+            org_service_url_configured = getattr(settings, 'ORGANIZATION_SERVICE_URL', None)
+            if not org_service_url_configured:
+                # This error is still relevant if an org_id is passed but the system isn't
+                # configured to potentially interact with an org service (even via gateway).
+                mutation_errors.append("Organization service integration is not configured, but an organization ID was provided.")
+            
+            org_context_instance = OrganizationStub(id=organization_id)
+            # The direct call to the organization service is removed.
+            # The responsibility shifts to the gateway and the organization subgraph.
+            # Error handling for "Could not connect", "User not found in org" etc.
+            # would now typically happen when the client tries to query fields on
+            # the organizationContext, which the gateway would then try to resolve
+            # from the organization service.
+            # If a critical validation needs to happen *during* login (e.g., login to this org is forbidden),
+            # that might require a more complex setup or a direct check if absolutely necessary,
+            # but the general principle of federation is to compose data, not to make synchronous dependent calls.
 
         auth_payload_instance = AuthPayloadType(
             user=user,
             access_token=access_token_str,
             refresh_token=refresh_token_str,
-            organization_context=org_context_instance
+            organization_context=org_context_instance # Pass the stub
         )
         
-        # If there were errors fetching org context, but login itself was successful,
-        # we still return the auth_payload, but include the errors.
+        # If there were errors (e.g., org service not configured), include them.
+        # The errors related to fetching org details are now handled by the client/gateway
+        # when resolving the OrganizationStub.
         if mutation_errors:
              return LoginMutation(auth_payload=auth_payload_instance, errors=mutation_errors)
         
@@ -659,74 +649,26 @@ class LoginWithGoogleMutation(graphene.Mutation):
             mutation_errors = []
             
             if organization_id:
-                logger.info(f"LoginWithGoogleMutation: Retrieving organization context for org_id: {organization_id}")
-                org_service_url = getattr(settings, 'ORGANIZATION_SERVICE_URL', None)
-                if not org_service_url:
-                    mutation_errors.append("Organization service URL is not configured.")
-                else:
-                    query = """
-                        query GetMembershipDetails($userId: String!, $organizationId: String!) {
-                            organizationMembership(where: { userId_organizationId: { userId: $userId, organizationId: $organizationId }}) {
-                                isActive
-                                role
-                                organization {
-                                    id
-                                    name
-                                    slug
-                                }
-                            }
-                        }
-                    """
-                    variables = {
-                        "userId": str(user.id),
-                        "organizationId": str(organization_id)
-                    }
-                    try:
-                        response = requests.post(
-                            org_service_url,
-                            json={'query': query, 'variables': variables},
-                            headers={'Content-Type': 'application/json'}
-                        )
-                        response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
-                        
-                        data = response.json()
-                        
-                        if data.get("errors"):
-                            for error in data.get("errors", []):
-                                mutation_errors.append(f"Organization service error: {error.get('message', 'Unknown error')}")
-                        elif data.get("data") and data["data"].get("organizationMembership"):
-                            membership = data["data"]["organizationMembership"]
-                            if membership.get("isActive"):
-                                org_details = membership.get("organization")
-                                if org_details:
-                                    org_context_instance = OrganizationContextType(
-                                        id=org_details.get("id"),
-                                        name=org_details.get("name"),
-                                        slug=org_details.get("slug"),
-                                        user_role_in_org=membership.get("role")
-                                    )
-                                else:
-                                    mutation_errors.append("Organization details not found in membership.")
-                            else:
-                                mutation_errors.append("User membership in the specified organization is not active.")
-                        else:
-                            mutation_errors.append("User not found in the specified organization or membership is inactive.")
-                            
-                    except requests.exceptions.RequestException as e:
-                        mutation_errors.append(f"Could not connect to organization service: {str(e)}")
-                    except ValueError: # Includes JSONDecodeError
-                        mutation_errors.append("Invalid response from organization service.")
+                logger.info(f"LoginWithGoogleMutation: Preparing organization stub for org_id: {organization_id}")
+                org_service_url_configured = getattr(settings, 'ORGANIZATION_SERVICE_URL', None)
+                if not org_service_url_configured:
+                    mutation_errors.append("Organization service integration is not configured, but an organization ID was provided.")
+                
+                # Create a stub for the organization context. The gateway will resolve it.
+                org_context_instance = OrganizationStub(id=organization_id)
+                # Direct call to organization service is removed.
             
             # 11. Create auth payload with organization context
             auth_payload_instance = AuthPayloadType(
                 user=user,
                 access_token=access_token_str,
                 refresh_token=refresh_token_str,
-                organization_context=org_context_instance
+                organization_context=org_context_instance # Pass the stub
             )
             
-            # If there were errors fetching org context, but login itself was successful,
-            # we still return the auth_payload, but include the errors.
+            # If there were errors (e.g., org service not configured), include them.
+            # The errors related to fetching org details are now handled by the client/gateway
+            # when resolving the OrganizationStub.
             if mutation_errors:
                 return LoginWithGoogleMutation(auth_payload=auth_payload_instance, errors=mutation_errors)
             
@@ -749,5 +691,5 @@ class UserMutation(graphene.ObjectType):
     disable_mfa = DisableMFAMutation.Field(description="Disables MFA for the authenticated user after verification.")
     login_with_google = LoginWithGoogleMutation.Field(description="Logs in or registers a user using a Google ID Token.")
 
-# If you were to test users/schema.py in isolation (not recommended for complex projects):
-# schema = graphene.Schema(query=UserQuery, mutation=UserMutation) 
+# Build the federated schema
+schema = build_schema(query=UserQuery, mutation=UserMutation, federation_version=LATEST_VERSION)

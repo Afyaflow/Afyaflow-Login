@@ -11,11 +11,12 @@ build/
 
 # Virtual environment
 venv/
-env/
+/env
 .venv/
 *.env # Includes .env, .env.dev, .env.prod etc.
 .env
 .env.prod
+.dockerignore
 
 # If you want to commit a template .env file, use .env.example and add .env* to this gitignore
 
@@ -25,20 +26,9 @@ db.sqlite3
 db.sqlite3-journal
 staticfiles/ # If you collect static files here and don't serve them directly from app dirs in prod
 media/ # If you store user-uploaded media here
+/staticfiles/
 
-# IDE / Editor
-.vscode/
-.idea/
-*.swp
-*.swo
 
-# OS generated files
-.DS_Store
-Thumbs.db
-
-# Docker
-# If you have docker-compose.override.yml for local dev an don't want to commit it
-# docker-compose.override.yml
 
 # Other
 .pytest_cache/
@@ -60,8 +50,5 @@ auth-test-ui/.env.development.local
 auth-test-ui/.env.test.local
 auth-test-ui/.env.production.local
 
-docker-compose.override.yml
-docker-compose.yml
-dockerfile
-docker-entrypoint.sh
-
+.gitignore
+/AfyaflowSystemBlueprint.md

@@ -8,10 +8,10 @@ load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# SECURITY WARNING: keep the secret key used in production secret!
+
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-default-key-change-this')
 
-# SECURITY WARNING: don't run with debug turned on in production!
+
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
@@ -135,10 +135,8 @@ SITE_ID = 1
 
 # Allauth settings
 ACCOUNT_AUTHENTICATION_METHOD = 'email' # Explicitly set to email
-# ACCOUNT_EMAIL_REQUIRED = True # Deprecated
-# ACCOUNT_USERNAME_REQUIRED = False # Deprecated
-ACCOUNT_SIGNUP_FIELDS = ['email'] # For programmatic use, adapt if using allauth forms directly
-ACCOUNT_EMAIL_VERIFICATION = 'optional' # Can be 'mandatory' or 'none'. 'optional' is a good start.
+ACCOUNT_SIGNUP_FIELDS = ['email'] # For programmatic use
+ACCOUNT_EMAIL_VERIFICATION = 'optional' 
 ACCOUNT_LOGIN_ON_EMAIL_CONFIRMATION = True # Logs user in after email confirmation
 ACCOUNT_LOGIN_ON_PASSWORD_RESET = True # Logs user in after password reset
 # LOGIN_REDIRECT_URL = '/'  # Or your frontend URL where user is redirected after login
@@ -151,8 +149,7 @@ ACCOUNT_USER_MODEL_EMAIL_FIELD = 'email'
 
 SOCIALACCOUNT_PROVIDERS = {
     'google': {
-        # For OIDC Connect behavior, this must be set to True
-        # 'OIDC_PROFILE_ID_TOKEN': True,
+        
         'APP': {
             'client_id': os.getenv('GOOGLE_OAUTH_CLIENT_ID'),
             'secret': os.getenv('GOOGLE_OAUTH_CLIENT_SECRET'),
@@ -191,7 +188,7 @@ CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only for development
 CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', '').split(',') if not DEBUG else []
 
 # Organization Service settings
-ORGANIZATION_SERVICE_URL = os.getenv('ORGANIZATION_SERVICE_URL', 'http://localhost:3000')
+ORGANIZATION_SERVICE_URL = os.getenv('ORGANIZATION_SERVICE_URL')
 
 # Google OAuth Client ID
-GOOGLE_CLIENT_ID = "492095795324-ums4dgnt4b168vndktsqkkbc4l5o189n.apps.googleusercontent.com" 
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_OAUTH_CLIENT_ID') 
