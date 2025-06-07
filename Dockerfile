@@ -23,8 +23,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application code
 COPY . .
 
-# Make directory for application code
-RUN mkdir -p /app/afyaflow_auth /app/users
+
 
 # Copy entrypoint script and make it executable (as root)
 COPY docker-entrypoint.sh .

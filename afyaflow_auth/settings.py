@@ -151,7 +151,6 @@ SITE_ID = 1
 
 # Allauth settings
 ACCOUNT_LOGIN_METHODS = ['email'] # Replaces deprecated ACCOUNT_AUTHENTICATION_METHOD
-ACCOUNT_AUTHENTICATION_METHOD = 'email' # Explicitly set to email
 ACCOUNT_SIGNUP_FIELDS = ['email'] # For programmatic use
 ACCOUNT_EMAIL_VERIFICATION = 'optional' 
 ACCOUNT_LOGIN_ON_EMAIL_CONFIRMATION = True # Logs user in after email confirmation
@@ -202,7 +201,8 @@ JWT_REFRESH_TOKEN_LIFETIME = 1440  # minutes (24 hours)
 
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only for development
-CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', '').split(',') if not DEBUG else []
+cors_origins_str = os.getenv('CORS_ALLOWED_ORIGINS', '')
+CORS_ALLOWED_ORIGINS = [origin for origin in cors_origins_str.split(',') if origin] if not DEBUG else []
 
 # Organization Service settings
 ORGANIZATION_SERVICE_URL = os.getenv('ORGANIZATION_SERVICE_URL')
