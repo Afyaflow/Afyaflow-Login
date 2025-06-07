@@ -28,9 +28,15 @@ if railway_domain:
 ALLOWED_HOSTS = default_allowed + [host for host in os.getenv('ALLOWED_HOSTS', '').split(',') if host]
 print(f"ALLOWED_HOSTS: {ALLOWED_HOSTS}")
 
-#
+# A list of trusted origins for unsafe requests (e.g., POST).
+# This is a security measure to prevent CSRF attacks.
 csrf_origins_str = os.getenv('CSRF_TRUSTED_ORIGINS', '')
-csrf_origins = [origin for origin in csrf_origins_str.split(',') if origin]
+csrf_origins = []
+
+# Add origins from environment variable if any
+for origin in csrf_origins_str.split(','):
+    if origin.strip():
+        csrf_origins.append(origin.strip())
 
 # Always include Railway domains for CSRF protection
 if railway_domain:

@@ -74,12 +74,19 @@ else:
 # Determine the port number (default to 8000 if not provided)
 PORT=${PORT:-8000}
 echo "PORT is set to: $PORT"
+echo "Using address: 0.0.0.0:$PORT for binding"
+
+# Verify network interfaces
+echo "Network interfaces:"
+ip addr || echo "ip command not available"
 
 # Check if any arguments were passed to the script
 if [ $# -eq 0 ]; then
     echo "No command specified, running gunicorn by default..."
-    echo "Starting gunicorn on port $PORT"
-    exec gunicorn --workers=2 --timeout=120 --bind=0.0.0.0:$PORT afyaflow_auth.wsgi:application --log-file=-
+    echo "Starting gunicorn on port $PORT with command: gunicorn --workers=2 --timeout=120 --bind=0.0.0.0:$PORT afyaflow_auth.wsgi:application --log-file=-"
+    
+    # Add an explicit print statement at the end to confirm we're still running
+    exec gunicorn --workers=2 --timeout=120 --bind=0.0.0.0:$PORT afyaflow_auth.wsgi:application --log-file=- --access-logfile=- --error-logfile=- --capture-output
 else
     echo "Starting web server with command: $@"
     exec "$@"
