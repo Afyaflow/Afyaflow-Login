@@ -15,12 +15,32 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-default-key-change-
 
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '127.0.0.1,localhost').split(',')
+# Print debugging info
+railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN', '')
+if railway_domain:
+    print(f"RAILWAY_PUBLIC_DOMAIN is: {railway_domain}")
 
-# A list of trusted origins for unsafe requests (e.g., POST).
-# This is a security measure to prevent CSRF attacks.
+# Always include common local hosts, railway domain, and any domains from ALLOWED_HOSTS env var
+default_allowed = ['127.0.0.1', 'localhost', '.railway.app']
+if railway_domain:
+    default_allowed.append(railway_domain)
+
+ALLOWED_HOSTS = default_allowed + [host for host in os.getenv('ALLOWED_HOSTS', '').split(',') if host]
+print(f"ALLOWED_HOSTS: {ALLOWED_HOSTS}")
+
+#
 csrf_origins_str = os.getenv('CSRF_TRUSTED_ORIGINS', '')
-CSRF_TRUSTED_ORIGINS = [origin for origin in csrf_origins_str.split(',') if origin]
+csrf_origins = [origin for origin in csrf_origins_str.split(',') if origin]
+
+# Always include Railway domains for CSRF protection
+if railway_domain:
+    csrf_origins.append(f"https://{railway_domain}")
+
+# Always allow Railway domains
+csrf_origins.append("https://*.railway.app")
+
+CSRF_TRUSTED_ORIGINS = csrf_origins
+print(f"CSRF_TRUSTED_ORIGINS: {CSRF_TRUSTED_ORIGINS}")
 
 # Application definition
 INSTALLED_APPS = [
