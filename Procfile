@@ -1,1 +1,1 @@
-web: gunicorn afyaflow_auth.wsgi --log-file - 
+web: gunicorn --workers=2 --timeout=120 --bind=0.0.0.0:$PORT afyaflow_auth.wsgi:application --log-file=- 
