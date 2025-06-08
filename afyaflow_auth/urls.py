@@ -5,9 +5,9 @@ from django.urls import path, include
 from graphene_django.views import GraphQLView
 from django.views.decorators.csrf import csrf_exempt
 from django.http import HttpResponse
+from django.conf import settings
 
-# Import your federated schema
-# Adjust 'users.schema' to the actual Python path of your schema file and variable
+# Import federated schema
 from users.graphql.schema import schema as users_federated_schema # Renaming to avoid potential name clashes
 
 # Simple health check view
@@ -21,11 +21,10 @@ urlpatterns = [
     
     # Health check endpoint for Railway
     path('health/', health_check),
-    path('', health_check),  # Root path for easy testing
 
     # Your primary GraphQL endpoint using the federated schema
     path("graphql", csrf_exempt(GraphQLView.as_view(
-        graphiql=True,
+        graphiql=settings.DEBUG, # Set to True in dev, False in prod
         schema=users_federated_schema # Pass your federated schema here
     ))),
 ]

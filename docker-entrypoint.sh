@@ -76,10 +76,6 @@ PORT=${PORT:-8000}
 echo "PORT is set to: $PORT"
 echo "Using address: 0.0.0.0:$PORT for binding"
 
-# Verify network interfaces
-echo "Network interfaces:"
-ip addr || echo "ip command not available"
-
 # Check if any arguments were passed to the script
 if [ $# -eq 0 ]; then
     echo "No command specified, running gunicorn by default..."
