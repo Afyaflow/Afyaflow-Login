@@ -86,7 +86,7 @@ class LoginMutation(graphene.Mutation):
         django_login(info.context, user)
         logger.info(f"User {email} logged in successfully.")
         
-        auth_data = create_auth_payload(user)
+        auth_data = create_auth_payload(user, organization_id=organization_id)
         org_context_instance = OrganizationStub(id=organization_id) if organization_id else None
         
         auth_payload_instance = AuthPayloadType(
@@ -167,7 +167,7 @@ class LoginWithGoogleMutation(graphene.Mutation):
             # Log user into Django session
             django_login(info.context, user, backend='django.contrib.auth.backends.ModelBackend')
             
-            auth_data = create_auth_payload(user)
+            auth_data = create_auth_payload(user, organization_id=organization_id)
             org_context_instance = OrganizationStub(id=organization_id) if organization_id else None
             
             auth_payload_instance = AuthPayloadType(

@@ -176,12 +176,12 @@ AUTHENTICATION_BACKENDS = [
 SITE_ID = 1
 
 # Allauth settings
-ACCOUNT_LOGIN_METHODS = ['email'] # Replaces deprecated ACCOUNT_AUTHENTICATION_METHOD
+ACCOUNT_LOGIN_METHODS = ['email'] # 
 ACCOUNT_SIGNUP_FIELDS = ['email'] # For programmatic use
 ACCOUNT_EMAIL_VERIFICATION = 'optional' 
 ACCOUNT_LOGIN_ON_EMAIL_CONFIRMATION = True # Logs user in after email confirmation
 ACCOUNT_LOGIN_ON_PASSWORD_RESET = True # Logs user in after password reset
-# LOGIN_REDIRECT_URL = '/'  # Or your frontend URL where user is redirected after login
+# LOGIN_REDIRECT_URL = '/'  # Or frontend URL where user is redirected after login
 # ACCOUNT_LOGOUT_REDIRECT_URL = '/'
 SOCIALACCOUNT_ADAPTER = 'allauth.socialaccount.adapter.DefaultSocialAccountAdapter'
 ACCOUNT_ADAPTER = 'allauth.account.adapter.DefaultAccountAdapter'
@@ -195,7 +195,7 @@ SOCIALACCOUNT_PROVIDERS = {
         'APP': {
             'client_id': os.getenv('GOOGLE_OAUTH_CLIENT_ID'),
             'secret': os.getenv('GOOGLE_OAUTH_CLIENT_SECRET'),
-            'key': '' # Not typically used for Google OAuth2
+            'key': ''
         },
         'SCOPE': [
             'profile',
@@ -224,6 +224,7 @@ JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', SECRET_KEY)
 JWT_ALGORITHM = 'HS256'
 JWT_ACCESS_TOKEN_LIFETIME = 30  # minutes
 JWT_REFRESH_TOKEN_LIFETIME = 1440  # minutes (24 hours)
+JWT_OCT_LIFETIME = 30 # minutes, lifetime for the organization context token
 
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only for development
@@ -232,6 +233,7 @@ CORS_ALLOWED_ORIGINS = [origin for origin in cors_origins_str.split(',') if orig
 
 # Organization Service settings
 ORGANIZATION_SERVICE_URL = os.getenv('ORGANIZATION_SERVICE_URL')
+INTERNAL_SERVICE_TOKEN = os.getenv('INTERNAL_SERVICE_TOKEN')
 
 # Google OAuth Client ID
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_OAUTH_CLIENT_ID') 

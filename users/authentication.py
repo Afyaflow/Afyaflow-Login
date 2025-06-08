@@ -84,4 +84,32 @@ def create_token(user_id: str, token_type: str = 'access') -> Tuple[str, datetim
         algorithm=settings.JWT_ALGORITHM
     )
     
+    return token, expires_at
+
+
+def create_oct_token(user_id: str, organization_id: str, permissions: list) -> Tuple[str, datetime]:
+    """
+    Create a new Organization Context Token (OCT) for the given user and organization.
+    """
+    now = timezone.now()
+    lifetime = timedelta(minutes=settings.JWT_OCT_LIFETIME)
+    expires_at = now + lifetime
+
+    # Create the token payload
+    payload = {
+        'sub': str(user_id),  # subject (user id)
+        'org_id': str(organization_id), # organization id
+        'permissions': permissions, # user's permissions in the organization
+        'type': 'oct',
+        'iat': now.timestamp(),  # issued at
+        'exp': expires_at.timestamp(),  # expiration time
+    }
+
+    # Create the token
+    token = jwt.encode(
+        payload,
+        settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM
+    )
+
     return token, expires_at 
