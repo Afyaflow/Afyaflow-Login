@@ -13,6 +13,7 @@ from .mutations.profile import (
     UpdateProfileMutation,
     ChangePasswordMutation,
     InitiatePasswordResetMutation,
+    ConfirmPasswordResetMutation,
 )
 from .mutations.mfa import (
     InitiateMFASetupMutation,
@@ -31,6 +32,7 @@ class UserMutation(graphene.ObjectType):
     update_profile = UpdateProfileMutation.Field()
     change_password = ChangePasswordMutation.Field()
     initiate_password_reset = InitiatePasswordResetMutation.Field()
+    confirm_password_reset = ConfirmPasswordResetMutation.Field()
     
     initiate_mfa_setup = InitiateMFASetupMutation.Field(description="Initiates the MFA setup process for the authenticated user.")
     verify_mfa_setup = VerifyMFASetupMutation.Field(description="Verifies the OTP code and enables MFA for the user.")

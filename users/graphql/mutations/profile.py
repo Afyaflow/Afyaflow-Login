@@ -135,3 +135,45 @@ class InitiatePasswordResetMutation(graphene.Mutation):
 
         logger.info(f"Password reset token sent to {email}.")
         return InitiatePasswordResetMutation(ok=True, message="If an account with this email exists, a password reset link has been sent.")
+
+class ConfirmPasswordResetMutation(graphene.Mutation):
+    """
+    Completes the password reset process using a valid token.
+    """
+    class Arguments:
+        token = graphene.String(required=True)
+        new_password = graphene.String(required=True)
+        new_password_confirm = graphene.String(required=True)
+
+    ok = graphene.Boolean()
+    errors = graphene.List(graphene.String)
+
+    @classmethod
+    def mutate(cls, root, info, token, new_password, new_password_confirm):
+        if new_password != new_password_confirm:
+            return ConfirmPasswordResetMutation(ok=False, errors=["Passwords do not match."])
+
+        try:
+            user = User.objects.get(
+                password_reset_token=token,
+                password_reset_token_expires_at__gt=timezone.now()
+            )
+        except User.DoesNotExist:
+            return ConfirmPasswordResetMutation(ok=False, errors=["Invalid or expired token."])
+
+        try:
+            # Use Django's built-in validators to check password strength
+            validate_password(new_password, user)
+        except ValidationError as e:
+            return ConfirmPasswordResetMutation(ok=False, errors=list(e.messages))
+
+        # Set the new password
+        user.set_password(new_password)
+        
+        # Invalidate the reset token
+        user.password_reset_token = None
+        user.password_reset_token_expires_at = None
+        user.save()
+
+        logger.info(f"Password reset successfully for user {user.email}.")
+        return ConfirmPasswordResetMutation(ok=True, errors=None)
