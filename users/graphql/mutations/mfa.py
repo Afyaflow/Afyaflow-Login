@@ -1,108 +1,122 @@
 import graphene
 import pyotp
+import qrcode
+import base64
+from io import BytesIO
 import logging
-from django.db import transaction
-
-from ..types import UserType
+from graphql import GraphQLError
+from ..types import MFASetupResponseType
+from ...models import User
+from ..services import send_templated_email
 
 logger = logging.getLogger(__name__)
 
 class InitiateMFASetupMutation(graphene.Mutation):
-    """Initiates the MFA setup process for the authenticated user."""
-    otp_provisioning_uri = graphene.String()
-    mfa_secret = graphene.String()
-    ok = graphene.Boolean()
+    """
+    Initiates the MFA setup process for the authenticated user.
+    Generates a new MFA secret and a QR code for authenticator apps.
+    """
+    class Arguments:
+        pass
+
+    response = graphene.Field(MFASetupResponseType)
     errors = graphene.List(graphene.String)
 
-    @classmethod
-    @transaction.atomic
-    def mutate(cls, root, info):
+    @staticmethod
+    def mutate(root, info):
         user = info.context.user
-        if user.is_anonymous:
-            return InitiateMFASetupMutation(ok=False, errors=["User is not authenticated."])
+        if not user.is_authenticated:
+            return InitiateMFASetupMutation(errors=["Authentication required."])
 
-        if user.mfa_enabled and user.mfa_setup_complete:
-            return InitiateMFASetupMutation(ok=False, errors=["MFA is already set up. Disable it first to re-setup."])
+        # Generate a new secret for the user
+        mfa_secret = pyotp.random_base32()
+        user.mfa_secret = mfa_secret
+        user.mfa_setup_complete = False  # Mark as incomplete until verified
+        user.save()
 
-        temp_secret = pyotp.random_base32()
-        user.mfa_secret = temp_secret
-        user.mfa_enabled = False
-        user.mfa_setup_complete = False
-        user.save(update_fields=['mfa_secret', 'mfa_enabled', 'mfa_setup_complete'])
-
-        issuer_name = "Afyaflow"  # Consider making this a setting
-        otp_uri = pyotp.totp.TOTP(temp_secret).provisioning_uri(
+        # Generate OTP provisioning URI
+        otp_uri = pyotp.totp.TOTP(mfa_secret).provisioning_uri(
             name=user.email,
-            issuer_name=issuer_name
+            issuer_name="AfyaFlow"
         )
-        
+
+        # Generate QR code
+        img = qrcode.make(otp_uri)
+        buffered = BytesIO()
+        img.save(buffered, format="PNG")
+        qr_code_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+
         logger.info(f"MFA setup initiated for user {user.email}.")
         return InitiateMFASetupMutation(
-            ok=True,
-            otp_provisioning_uri=otp_uri,
-            mfa_secret=temp_secret
+            response=MFASetupResponseType(qr_code_image=qr_code_base64, mfa_secret=mfa_secret),
+            errors=None
         )
 
 class VerifyMFASetupMutation(graphene.Mutation):
-    """Verifies the OTP code and enables MFA for the user."""
+    """
+    Verifies the OTP code to complete the MFA setup process.
+    """
     class Arguments:
-        otp_code = graphene.String(required=True)
+        mfa_code = graphene.String(required=True)
 
-    ok = graphene.Boolean()
-    user = graphene.Field(UserType)
+    success = graphene.Boolean()
     errors = graphene.List(graphene.String)
 
-    @classmethod
-    @transaction.atomic
-    def mutate(cls, root, info, otp_code):
+    @staticmethod
+    def mutate(root, info, mfa_code):
         user = info.context.user
-        if user.is_anonymous:
-            return VerifyMFASetupMutation(ok=False, errors=["User is not authenticated."])
+        if not user.is_authenticated:
+            return VerifyMFASetupMutation(success=False, errors=["Authentication required."])
 
         if not user.mfa_secret:
-            return VerifyMFASetupMutation(ok=False, errors=["MFA setup has not been initiated."])
-        
-        if user.mfa_setup_complete:
-            return VerifyMFASetupMutation(ok=False, errors=["MFA is already verified."])
+            return VerifyMFASetupMutation(success=False, errors=["MFA setup has not been initiated."])
 
         totp = pyotp.TOTP(user.mfa_secret)
-        if totp.verify(otp_code):
-            user.mfa_enabled = True
-            user.mfa_setup_complete = True
-            user.save(update_fields=['mfa_enabled', 'mfa_setup_complete'])
-            logger.info(f"MFA setup verified for user {user.email}.")
-            return VerifyMFASetupMutation(ok=True, user=user)
-        else:
-            logger.warning(f"MFA verification failed for user {user.email}: Invalid OTP code.")
-            return VerifyMFASetupMutation(ok=False, user=user, errors=["Invalid OTP code."])
+        if not totp.verify(mfa_code):
+            return VerifyMFASetupMutation(success=False, errors=["Invalid MFA code."])
+
+        user.mfa_enabled = True
+        user.mfa_setup_complete = True
+        user.save()
+
+        send_templated_email(
+            recipient=user.email,
+            template_id="mfa-enabled",
+            context={"name": user.get_full_name()}
+        )
+        
+        logger.info(f"MFA has been enabled for user {user.email}.")
+        return VerifyMFASetupMutation(success=True, errors=None)
 
 class DisableMFAMutation(graphene.Mutation):
-    """Disables MFA for the authenticated user."""
+    """
+    Disables MFA for the authenticated user after verifying their password.
+    """
     class Arguments:
-        otp_code = graphene.String(required=True)
+        password = graphene.String(required=True)
 
-    ok = graphene.Boolean()
-    user = graphene.Field(UserType)
+    success = graphene.Boolean()
     errors = graphene.List(graphene.String)
 
-    @classmethod
-    @transaction.atomic
-    def mutate(cls, root, info, otp_code):
+    @staticmethod
+    def mutate(root, info, password):
         user = info.context.user
-        if user.is_anonymous:
-            return DisableMFAMutation(ok=False, errors=["User is not authenticated."])
+        if not user.is_authenticated:
+            return DisableMFAMutation(success=False, errors=["Authentication required."])
 
-        if not user.mfa_setup_complete:
-            return DisableMFAMutation(ok=False, errors=["MFA is not enabled."])
-        
-        totp = pyotp.TOTP(user.mfa_secret)
-        if not totp.verify(otp_code):
-            logger.warning(f"MFA disable failed for user {user.email}: Invalid OTP code.")
-            return DisableMFAMutation(ok=False, user=user, errors=["Invalid OTP code."])
+        if not user.check_password(password):
+            return DisableMFAMutation(success=False, errors=["Invalid password."])
 
         user.mfa_enabled = False
-        user.mfa_secret = None
         user.mfa_setup_complete = False
-        user.save(update_fields=['mfa_enabled', 'mfa_secret', 'mfa_setup_complete'])
-        logger.info(f"MFA disabled for user {user.email}.")
-        return DisableMFAMutation(ok=True, user=user)
+        user.mfa_secret = None
+        user.save()
+
+        send_templated_email(
+            recipient=user.email,
+            template_id="mfa-disabled",
+            context={"name": user.get_full_name()}
+        )
+
+        logger.info(f"MFA has been disabled for user {user.email}.")
+        return DisableMFAMutation(success=True, errors=None)

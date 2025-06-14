@@ -28,6 +28,8 @@ staticfiles/ # If you collect static files here and don't serve them directly fr
 media/ # If you store user-uploaded media here
 /staticfiles/
 
+/email-service/
+email-service/ 
 
 
 # Other

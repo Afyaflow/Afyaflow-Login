@@ -4,6 +4,8 @@ from django.conf import settings
 from django.utils import timezone
 from ..models import User, RefreshToken
 from ..authentication import create_token, create_oct_token
+from graphql import GraphQLError
+import json
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -240,3 +242,57 @@ class GoogleAuthService:
                 extra_data=token_info
             )
             return user
+
+def get_organization_context(user, organization_id, internal_service_token):
+    # ... existing code ...
+    except requests.RequestException as e:
+        # The organization service might be down or there's a network issue
+        return None, f"Failed to connect to the organization service: {e}"
+    except Exception as e:
+        # Catch any other unexpected errors
+        return None, f"An unexpected error occurred while fetching organization context: {e}"
+
+def send_templated_email(recipient: str, template_id: str, context: dict):
+    """
+    Calls the communication microservice to send a templated email.
+    """
+    comm_service_url = getattr(settings, 'COMMUNICATION_SERVICE_URL', None)
+    if not comm_service_url:
+        logger.warning("COMMUNICATION_SERVICE_URL is not set. Skipping email.")
+        return
+
+    mutation = """
+    mutation SendTemplatedEmail($recipient: String!, $templateId: String!, $contextJson: String!) {
+      sendTemplatedEmail(recipient: $recipient, templateId: $templateId, contextJson: $contextJson) {
+        success
+        message
+      }
+    }
+    """
+
+    variables = {
+        "recipient": recipient,
+        "templateId": template_id,
+        "contextJson": json.dumps(context)
+    }
+
+    try:
+        response = requests.post(
+            comm_service_url,
+            json={'query': mutation, 'variables': variables},
+            timeout=5  # 5-second timeout
+        )
+        response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
+        
+        response_data = response.json()
+        if 'errors' in response_data:
+            logger.error(f"Error from communication service: {response_data['errors']}")
+        else:
+            logger.info(f"Successfully queued email via communication service: {response_data}")
+
+    except requests.RequestException as e:
+        # Handle network errors, timeouts, etc.
+        logger.error(f"Error sending email request to communication service: {e}")
+    except Exception as e:
+        # Handle other errors (e.g., JSON decoding)
+        logger.error(f"An unexpected error occurred when trying to send an email: {e}")

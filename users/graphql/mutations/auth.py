@@ -9,6 +9,7 @@ from ..types import AuthPayloadType, OrganizationStub
 from ..services import create_auth_payload, GoogleAuthService
 from ...models import RefreshToken, User
 from ...serializers import UserRegistrationSerializer
+from ..services import send_templated_email
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,15 @@ class RegisterMutation(graphene.Mutation):
         
         auth_data = create_auth_payload(user)
         auth_payload_instance = AuthPayloadType(**auth_data)
+        
+        # Send welcome email
+        send_templated_email(
+            recipient=user.email,
+            template_id="welcome",  # This ID must exist in the email-service
+            context={
+                "name": user.get_full_name(),
+            }
+        )
         
         return RegisterMutation(auth_payload=auth_payload_instance, errors=None)
 

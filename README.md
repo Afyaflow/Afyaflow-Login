@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # AfyaFlow Auth Service
 
 AfyaFlow Auth Service is a robust authentication and user management system built with Django. It provides a GraphQL API for user registration, login (including social login with Google), multi-factor authentication (MFA), and user profile management. 
@@ -119,9 +118,3 @@ Once the Docker containers are running (using `docker-compose up`), the applicat
         docker-compose exec auth_service python manage.py createsuperuser
         ```
 *   **Allauth URLs:** `http://localhost:8000/accounts/` (e.g., for Google login initiation, password resets if configured through Allauth templates).
-
-
-=======
-# Afyaflow-Login
-Login and Authentication
->>>>>>> b2fbb4ad4bc4a9d28b7f54355dcf007c0c107015
