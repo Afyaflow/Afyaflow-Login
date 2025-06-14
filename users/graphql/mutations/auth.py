@@ -7,25 +7,25 @@ from django.utils import timezone
 from graphql import GraphQLError
 
 from ..types import AuthPayloadType, OrganizationStub
-from ..services import create_auth_payload, GoogleAuthService
+from ..services import GoogleAuthService, create_auth_payload
 from ...models import RefreshToken, User
 from ...serializers import UserRegistrationSerializer
-from ...authentication import create_access_token, create_refresh_token, get_user_from_refresh_token
+from ...authentication import create_token
 from ...communication_client import send_templated_email
 
 logger = logging.getLogger(__name__)
 
 class RegisterMutation(graphene.Mutation):
-    """Registers a new user and returns JWT tokens."""
-    auth_payload = graphene.Field(AuthPayloadType)
-    errors = graphene.List(graphene.String)
-
+    """Registers a new user in the system."""
     class Arguments:
         email = graphene.String(required=True)
         password = graphene.String(required=True)
         password_confirm = graphene.String(required=True)
         first_name = graphene.String()
         last_name = graphene.String()
+
+    auth_payload = graphene.Field(AuthPayloadType)
+    errors = graphene.List(graphene.String)
 
     @classmethod
     @transaction.atomic
@@ -45,7 +45,7 @@ class RegisterMutation(graphene.Mutation):
         
         user = serializer.save()
         
-        # Send welcome email after successful registration
+        # Send welcome email
         try:
             context = {"first_name": user.first_name or "there"}
             email_sent = send_templated_email(
@@ -54,7 +54,6 @@ class RegisterMutation(graphene.Mutation):
                 context=context
             )
             if not email_sent:
-                # Log the failure but don't block the registration process
                 logger.warning(f"Failed to send welcome email to {user.email}, but registration will proceed.")
         except Exception as e:
             logger.error(f"An unexpected error occurred trying to send welcome email for {user.email}: {e}")
