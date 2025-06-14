@@ -235,8 +235,8 @@ CORS_ALLOWED_ORIGINS = [origin for origin in cors_origins_str.split(',') if orig
 ORGANIZATION_SERVICE_URL = os.getenv('ORGANIZATION_SERVICE_URL')
 INTERNAL_SERVICE_TOKEN = os.getenv('INTERNAL_SERVICE_TOKEN')
 
+# Email Service settings
+EMAIL_SERVICE_URL = os.getenv('EMAIL_SERVICE_URL')
+
 # Google OAuth Client ID
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_OAUTH_CLIENT_ID') 
-
-# Communication Service URL
-COMMUNICATION_SERVICE_URL = os.getenv('COMMUNICATION_SERVICE_URL') 

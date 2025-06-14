@@ -4,26 +4,28 @@ from django.db import transaction
 from django.contrib.auth import authenticate, login as django_login
 from django.conf import settings
 from django.utils import timezone
+from graphql import GraphQLError
 
 from ..types import AuthPayloadType, OrganizationStub
 from ..services import create_auth_payload, GoogleAuthService
 from ...models import RefreshToken, User
 from ...serializers import UserRegistrationSerializer
-from ..services import send_templated_email
+from ...authentication import create_access_token, create_refresh_token, get_user_from_refresh_token
+from users.communication_client import send_templated_email
 
 logger = logging.getLogger(__name__)
 
 class RegisterMutation(graphene.Mutation):
-    """Registers a new user in the system."""
+    """Registers a new user and returns JWT tokens."""
+    auth_payload = graphene.Field(AuthPayloadType)
+    errors = graphene.List(graphene.String)
+
     class Arguments:
         email = graphene.String(required=True)
         password = graphene.String(required=True)
         password_confirm = graphene.String(required=True)
         first_name = graphene.String()
         last_name = graphene.String()
-
-    auth_payload = graphene.Field(AuthPayloadType)
-    errors = graphene.List(graphene.String)
 
     @classmethod
     @transaction.atomic
@@ -42,19 +44,25 @@ class RegisterMutation(graphene.Mutation):
             return RegisterMutation(auth_payload=None, errors=errors)
         
         user = serializer.save()
+        
+        # Send welcome email after successful registration
+        try:
+            context = {"first_name": user.first_name or "there"}
+            email_sent = send_templated_email(
+                recipient=user.email,
+                template_id='user_registration',
+                context=context
+            )
+            if not email_sent:
+                # Log the failure but don't block the registration process
+                logger.warning(f"Failed to send welcome email to {user.email}, but registration will proceed.")
+        except Exception as e:
+            logger.error(f"An unexpected error occurred trying to send welcome email for {user.email}: {e}")
+
         logger.info(f"User {email} registered successfully.")
         
         auth_data = create_auth_payload(user)
         auth_payload_instance = AuthPayloadType(**auth_data)
-        
-        # Send welcome email
-        send_templated_email(
-            recipient=user.email,
-            template_id="welcome",  # This ID must exist in the email-service
-            context={
-                "name": user.get_full_name(),
-            }
-        )
         
         return RegisterMutation(auth_payload=auth_payload_instance, errors=None)
 
