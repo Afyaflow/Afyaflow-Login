@@ -41,6 +41,10 @@ class User(AbstractUser):
     is_suspended = models.BooleanField(default=False)
     suspension_reason = models.TextField(null=True, blank=True)
     
+    # Password Reset fields
+    password_reset_token = models.CharField(max_length=128, null=True, blank=True)
+    password_reset_token_expires_at = models.DateTimeField(null=True, blank=True)
+
     objects = UserManager()
 
     USERNAME_FIELD = 'email'

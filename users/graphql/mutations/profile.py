@@ -3,10 +3,14 @@ import logging
 from django.db import transaction
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.utils import timezone
+from datetime import timedelta
+import secrets
 
 from ..types import UserType
-from ...models import RefreshToken
+from ...models import RefreshToken, User
 from ...serializers import UserProfileSerializer
+from ...communication_client import send_templated_email
 
 logger = logging.getLogger(__name__)
 
@@ -83,3 +87,51 @@ class ChangePasswordMutation(graphene.Mutation):
         logger.info(f"User {user.email} changed their password successfully.")
 
         return ChangePasswordMutation(ok=True, errors=None)
+
+class InitiatePasswordResetMutation(graphene.Mutation):
+    """
+    Initiates the password reset process for a user by generating a token
+    and sending it to their email.
+    """
+    class Arguments:
+        email = graphene.String(required=True)
+
+    ok = graphene.Boolean()
+    message = graphene.String()
+    errors = graphene.List(graphene.String)
+
+    @classmethod
+    def mutate(cls, root, info, email):
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            # Don't reveal that the user does not exist.
+            # Return a success-like message to prevent user enumeration.
+            logger.warning(f"Password reset initiated for non-existent email: {email}")
+            return InitiatePasswordResetMutation(ok=True, message="If an account with this email exists, a password reset link has been sent.")
+
+        # Generate a secure, URL-safe token
+        token = secrets.token_urlsafe(32)
+        
+        # Set token and expiry on the user model (e.g., valid for 10 minutes)
+        user.password_reset_token = token
+        user.password_reset_token_expires_at = timezone.now() + timedelta(minutes=10)
+        user.save()
+
+        # Send the password reset email
+        try:
+            context = {"first_name": user.first_name or "user", "reset_token": token}
+            email_sent = send_templated_email(
+                recipient=user.email,
+                template_id='password_reset',
+                context=context
+            )
+            if not email_sent:
+                logger.error(f"Failed to send password reset email to {user.email}.")
+                return InitiatePasswordResetMutation(ok=False, errors=["Failed to send email. Please try again later."])
+        except Exception as e:
+            logger.error(f"An unexpected error occurred trying to send password reset email for {user.email}: {e}")
+            return InitiatePasswordResetMutation(ok=False, errors=["An unexpected error occurred. Please try again later."])
+
+        logger.info(f"Password reset token sent to {email}.")
+        return InitiatePasswordResetMutation(ok=True, message="If an account with this email exists, a password reset link has been sent.")
