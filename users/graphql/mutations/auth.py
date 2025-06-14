@@ -11,7 +11,7 @@ from ..services import create_auth_payload, GoogleAuthService
 from ...models import RefreshToken, User
 from ...serializers import UserRegistrationSerializer
 from ...authentication import create_access_token, create_refresh_token, get_user_from_refresh_token
-from users.communication_client import send_templated_email
+from ...communication_client import send_templated_email
 
 logger = logging.getLogger(__name__)
 
