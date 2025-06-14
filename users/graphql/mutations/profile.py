@@ -96,6 +96,7 @@ class RequestPasswordResetMutation(graphene.Mutation):
 
     @staticmethod
     def mutate(root, info, email, reset_url_base):
+        message = "If an account with that email exists, a password reset link has been sent."
         try:
             user = User.objects.get(email=email)
             
@@ -115,11 +116,9 @@ class RequestPasswordResetMutation(graphene.Mutation):
                 }
             )
             
-            message = "If an account with that email exists, a password reset link has been sent."
             logger.info(f"Password reset initiated for {email}.")
             
         except User.DoesNotExist:
-            message = "If an account with that email exists, a password reset link has been sent."
             logger.warning(f"Password reset requested for non-existent user: {email}")
 
         return RequestPasswordResetMutation(success=True, message=message)
