@@ -96,14 +96,15 @@ class VerifyMFASetupMutation(graphene.Mutation):
 
         totp = pyotp.TOTP(user.mfa_secret)
         if totp.verify(otp_code):
-            user.mfa_enabled = True
             user.mfa_setup_complete = True
+            user.mfa_enabled = True
             user.save(update_fields=['mfa_enabled', 'mfa_setup_complete'])
-            logger.info(f"MFA setup verified for user {user.email}.")
-            return VerifyMFASetupMutation(ok=True, user=user)
+
+            logger.info(f"MFA setup was successfully verified for user {user.email}")
+            return VerifyMFASetupMutation(ok=True)
         else:
             logger.warning(f"MFA verification failed for user {user.email}: Invalid OTP code.")
-            return VerifyMFASetupMutation(ok=False, user=user, errors=["Invalid OTP code."])
+            return VerifyMFASetupMutation(ok=False, errors=["Invalid OTP code."])
 
 class DisableMFAMutation(graphene.Mutation):
     """Disables MFA for the authenticated user."""
@@ -127,11 +128,23 @@ class DisableMFAMutation(graphene.Mutation):
         totp = pyotp.TOTP(user.mfa_secret)
         if not totp.verify(otp_code):
             logger.warning(f"MFA disable failed for user {user.email}: Invalid OTP code.")
-            return DisableMFAMutation(ok=False, user=user, errors=["Invalid OTP code."])
+            return DisableMFAMutation(ok=False, errors=["Invalid OTP code."])
 
         user.mfa_enabled = False
         user.mfa_secret = None
         user.mfa_setup_complete = False
         user.save(update_fields=['mfa_enabled', 'mfa_secret', 'mfa_setup_complete'])
-        logger.info(f"MFA disabled for user {user.email}.")
-        return DisableMFAMutation(ok=True, user=user)
+
+        # Send confirmation email
+        try:
+            context = {"first_name": user.first_name or "user"}
+            send_templated_email(
+                recipient=user.email,
+                template_id='mfa_disabled',
+                context=context
+            )
+        except Exception as e:
+            logger.error(f"Failed to send MFA disabling email for {user.email}: {e}")
+
+        logger.info(f"MFA disabled for user {user.email}")
+        return DisableMFAMutation(ok=True, errors=None)
