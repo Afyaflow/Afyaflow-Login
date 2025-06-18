@@ -1,5 +1,5 @@
 from django.utils.functional import SimpleLazyObject
-from .authentication import JSONWebTokenAuthentication
+from .authentication import JWTAuthentication
 from django.contrib.auth.models import AnonymousUser
 from promise import Promise
 import logging
@@ -13,7 +13,7 @@ class GraphQLJWTMiddleware:
     """
     def __init__(self, get_response=None):
         self.get_response = get_response
-        self.authenticator = JSONWebTokenAuthentication()
+        self.authenticator = JWTAuthentication()
 
     def __call__(self, request):
         request.user = SimpleLazyObject(lambda: self.get_user(request))
