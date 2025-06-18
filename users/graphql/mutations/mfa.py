@@ -5,11 +5,12 @@ from io import BytesIO
 import base64
 from graphql import GraphQLError
 from ...communication_client import send_templated_email, send_sms
-from ...otp_utils import generate_otp, set_user_otp, verify_otp
+from ...otp_utils import generate_otp, verify_otp, hash_otp
 from ...models import User
 import logging
 from django.db import transaction
 from django.utils import timezone
+from datetime import timedelta
 
 from ..types import UserType
 
@@ -218,7 +219,10 @@ class AddPhoneNumberMutation(graphene.Mutation):
         user.phone_number_verified = False  # Mark as unverified until OTP is confirmed
         
         otp = generate_otp()
-        set_user_otp(user, otp) # Hashes and saves the OTP to the user model
+        # Save the phone number field along with the OTP fields.
+        user.mfa_otp = hash_otp(otp)
+        user.mfa_otp_expires_at = timezone.now() + timedelta(minutes=10)
+        user.save(update_fields=['phone_number', 'phone_number_verified', 'mfa_otp', 'mfa_otp_expires_at'])
 
         # Send the OTP via SMS
         message = f"Your AfyaFlow verification code is: {otp}"
