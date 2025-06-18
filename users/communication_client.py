@@ -111,6 +111,9 @@ def send_sms(recipient: str, message: str) -> bool:
         'Authorization': f'Bearer {internal_service_token}'
     }
 
+    logger.info(f"Attempting to send SMS via service. Recipient: {recipient}")
+    logger.debug(f"SMS Service Request Payload: query={mutation}, variables={variables}")
+
     try:
         response = requests.post(
             sms_service_url,

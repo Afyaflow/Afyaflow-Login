@@ -177,7 +177,7 @@ class VerifyMfaMutation(graphene.Mutation):
             return cls(auth_payload=None, errors=["Invalid OTP code."])
 
         # 4. Success! Log the user in and return the full auth payload.
-        django_login(info.context, user)
+        django_login(info.context, user, backend='django.contrib.auth.backends.ModelBackend')
         logger.info(f"User {user.email} successfully completed MFA and logged in.")
         auth_data = create_auth_payload(user)
         return cls(auth_payload=AuthPayloadType(**auth_data))
