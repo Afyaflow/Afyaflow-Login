@@ -20,6 +20,8 @@ from .mutations.mfa import (
     VerifyMFASetupMutation,
     DisableMFAMutation,
     ToggleEmailMfaMutation,
+    AddPhoneNumberMutation,
+    VerifyPhoneNumberMutation,
 )
 
 class UserMutation(graphene.ObjectType):
@@ -39,6 +41,8 @@ class UserMutation(graphene.ObjectType):
     verify_mfa_setup = VerifyMFASetupMutation.Field(description="Verifies the OTP code and enables MFA for the user.")
     disable_mfa = DisableMFAMutation.Field(description="Disables MFA for the authenticated user after verification.")
     toggle_email_mfa = ToggleEmailMfaMutation.Field(description="Enables or disables Email as an MFA factor.")
+    add_phone_number = AddPhoneNumberMutation.Field(description="Adds a phone number and sends a verification code.")
+    verify_phone_number = VerifyPhoneNumberMutation.Field(description="Verifies the OTP sent to a phone number.")
 
 
 # Build the federated schema
