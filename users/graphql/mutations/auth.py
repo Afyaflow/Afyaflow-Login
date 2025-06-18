@@ -89,12 +89,12 @@ class LoginMutation(graphene.Mutation):
             logger.warning(f"Login failed for email {email}: Account suspended. Reason: {reason}")
             return LoginMutation(auth_payload=None, errors=[f"Account is suspended. Reason: {reason}"])
 
-        # MFA Check
-        if user.mfa_enabled and user.mfa_setup_complete:
+        # MFA Check for TOTP
+        if user.mfa_totp_setup_complete:
             if not mfa_code:
                 return LoginMutation(auth_payload=None, errors=["MFA code is required."])
             import pyotp
-            totp = pyotp.TOTP(user.mfa_secret)
+            totp = pyotp.TOTP(user.mfa_totp_secret)
             if not totp.verify(mfa_code):
                 logger.warning(f"Login failed for email {email}: Invalid MFA code.")
                 return LoginMutation(auth_payload=None, errors=["Invalid MFA code."])
