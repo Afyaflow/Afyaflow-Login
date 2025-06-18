@@ -33,10 +33,21 @@ class User(AbstractUser):
     last_login = models.DateTimeField(null=True, blank=True)
     
     # MFA fields
-    mfa_enabled = models.BooleanField(default=False)
-    mfa_secret = models.CharField(max_length=32, null=True, blank=True)
-    mfa_setup_complete = models.BooleanField(default=False, help_text="Indicates if the user has successfully verified their MFA setup.")
+    mfa_totp_secret = models.CharField(max_length=32, null=True, blank=True, help_text="Secret for Time-based One-Time Password (TOTP).")
+    mfa_totp_setup_complete = models.BooleanField(default=False, help_text="Indicates if the user has successfully verified their TOTP setup.")
     
+    # New MFA method flags
+    mfa_email_enabled = models.BooleanField(default=False, help_text="Is MFA via Email OTP enabled?")
+    mfa_sms_enabled = models.BooleanField(default=False, help_text="Is MFA via SMS OTP enabled?")
+
+    # Phone number for SMS MFA
+    phone_number = models.CharField(max_length=20, null=True, blank=True, unique=True)
+    phone_number_verified = models.BooleanField(default=False)
+
+    # Fields for temporary OTPs (Email/SMS)
+    mfa_otp = models.CharField(max_length=128, null=True, blank=True, help_text="Stores the hashed one-time password.")
+    mfa_otp_expires_at = models.DateTimeField(null=True, blank=True, help_text="Expiry time for the one-time password.")
+
     # Account status
     is_suspended = models.BooleanField(default=False)
     suspension_reason = models.TextField(null=True, blank=True)

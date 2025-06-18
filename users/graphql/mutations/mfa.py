@@ -5,6 +5,7 @@ from io import BytesIO
 import base64
 from graphql import GraphQLError
 from ...communication_client import send_templated_email
+from ...otp_utils import generate_otp, set_user_otp, verify_otp
 import logging
 from django.db import transaction
 
@@ -148,3 +149,40 @@ class DisableMFAMutation(graphene.Mutation):
 
         logger.info(f"MFA disabled for user {user.email}")
         return DisableMFAMutation(ok=True, errors=None)
+
+class ToggleEmailMfaMutation(graphene.Mutation):
+    """
+    Enables or disables MFA via Email for the authenticated user.
+    """
+    class Arguments:
+        enable = graphene.Boolean(required=True)
+
+    ok = graphene.Boolean()
+    errors = graphene.List(graphene.String)
+
+    @classmethod
+    def mutate(cls, root, info, enable):
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("You must be logged in to manage MFA.")
+
+        user.mfa_email_enabled = enable
+        user.save(update_fields=['mfa_email_enabled'])
+
+        # Optionally, send a notification email about the change
+        template_id = 'mfa_email_enabled' if enable else 'mfa_email_disabled'
+        # Note: You would need to create these new templates in the email-service.
+        # For now, we are reusing the MFA disabled template as a placeholder.
+        if not enable:
+            try:
+                context = {"first_name": user.first_name or "user"}
+                send_templated_email(
+                    recipient=user.email,
+                    template_id='mfa_disabled', # Placeholder
+                    context=context
+                )
+            except Exception as e:
+                logger.error(f"Failed to send MFA email status change email for {user.email}: {e}")
+
+        logger.info(f"Email MFA has been {'enabled' if enable else 'disabled'} for user {user.email}.")
+        return cls(ok=True)
