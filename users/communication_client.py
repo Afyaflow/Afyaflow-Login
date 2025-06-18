@@ -112,7 +112,7 @@ def send_sms(recipient: str, message: str) -> bool:
     }
 
     logger.info(f"Attempting to send SMS via service. Recipient: {recipient}")
-    logger.debug(f"SMS Service Request Payload: query={mutation}, variables={variables}")
+    logger.warning(f"SMS Service Request Payload: query={mutation}, variables={variables}")
 
     try:
         response = requests.post(
