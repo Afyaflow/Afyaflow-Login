@@ -225,6 +225,7 @@ JWT_ALGORITHM = 'HS256'
 JWT_ACCESS_TOKEN_LIFETIME = 30  # minutes
 JWT_REFRESH_TOKEN_LIFETIME = 1440  # minutes (24 hours)
 JWT_OCT_LIFETIME = 30 # minutes, lifetime for the organization context token
+JWT_MFA_TOKEN_LIFETIME = 5 # minutes, for the two-step login flow
 
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only for development

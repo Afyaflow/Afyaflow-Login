@@ -5,6 +5,7 @@ from .queries import UserQuery
 from .mutations.auth import (
     RegisterMutation,
     LoginMutation,
+    VerifyMfaMutation,
     RefreshTokenMutation,
     LogoutMutation,
     LoginWithGoogleMutation,
@@ -29,6 +30,7 @@ class UserMutation(graphene.ObjectType):
     """Root mutation for user-related actions."""
     register = RegisterMutation.Field()
     login = LoginMutation.Field()
+    verify_mfa = VerifyMfaMutation.Field(description="Completes the second step of an MFA login.")
     refresh_token = RefreshTokenMutation.Field()
     logout = LogoutMutation.Field()
     login_with_google = LoginWithGoogleMutation.Field(description="Logs in or registers a user using a Google ID Token.")

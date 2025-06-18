@@ -54,6 +54,33 @@ class JWTAuthentication(authentication.BaseAuthentication):
         except ValueError:
             raise AuthenticationFailed('Invalid authorization header')
 
+    def authenticate_mfa_token(self, token: str) -> Tuple[User, dict]:
+        """
+        Authenticates a user from a raw MFA token string, bypassing the request header.
+        This is specifically for the second step of the MFA login flow.
+        """
+        try:
+            payload = jwt.decode(
+                token,
+                settings.JWT_SECRET_KEY,
+                algorithms=[settings.JWT_ALGORITHM]
+            )
+
+            user_id = payload.get('sub')
+            if user_id is None:
+                raise AuthenticationFailed('Invalid MFA token payload.')
+
+            user = User.objects.get(id=user_id)
+            if not user.is_active or user.is_suspended:
+                raise AuthenticationFailed('User account is inactive or suspended.')
+
+            return user, payload
+
+        except JWTError:
+            raise AuthenticationFailed('Invalid or expired MFA token.')
+        except User.DoesNotExist:
+            raise AuthenticationFailed('User not found.')
+
 
 def create_token(user_id: str, token_type: str = 'access') -> Tuple[str, datetime]:
     """
@@ -64,6 +91,8 @@ def create_token(user_id: str, token_type: str = 'access') -> Tuple[str, datetim
     # Set token lifetime based on type
     if token_type == 'access':
         lifetime = timedelta(minutes=settings.JWT_ACCESS_TOKEN_LIFETIME)
+    elif token_type == 'mfa':
+        lifetime = timedelta(minutes=settings.JWT_MFA_TOKEN_LIFETIME)
     else:  # refresh token
         lifetime = timedelta(minutes=settings.JWT_REFRESH_TOKEN_LIFETIME)
     

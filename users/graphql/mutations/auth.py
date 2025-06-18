@@ -6,12 +6,14 @@ from django.conf import settings
 from django.utils import timezone
 from graphql import GraphQLError
 
-from ..types import AuthPayloadType, OrganizationStub
+from ..types import AuthPayloadType, OrganizationStub, MfaChallengeType, LoginPayload
 from ..services import GoogleAuthService, create_auth_payload
 from ...models import RefreshToken, User
 from ...serializers import UserRegistrationSerializer
-from ...authentication import create_token
-from ...communication_client import send_templated_email
+from ...authentication import create_token, JWTAuthentication
+from ...communication_client import send_templated_email, send_sms
+from ...otp_utils import generate_otp, set_user_otp, verify_otp
+import pyotp
 
 logger = logging.getLogger(__name__)
 
@@ -66,52 +68,119 @@ class RegisterMutation(graphene.Mutation):
         return RegisterMutation(auth_payload=auth_payload_instance, errors=None)
 
 class LoginMutation(graphene.Mutation):
-    """Logs in an existing user."""
+    """
+    Logs in a user. This is the first step of a potential two-step MFA flow.
+    Returns either a full authentication payload or an MFA challenge.
+    """
     class Arguments:
         email = graphene.String(required=True)
         password = graphene.String(required=True)
-        organization_id = graphene.UUID(required=False, name="organizationId")
-        mfa_code = graphene.String(required=False, name="mfaCode")
+
+    payload = graphene.Field(LoginPayload)
+    errors = graphene.List(graphene.String)
+
+    @classmethod
+    @transaction.atomic
+    def mutate(cls, root, info, email, password):
+        user = authenticate(email=email, password=password)
+        if not user:
+            logger.warning(f"Login failed for email {email}: Invalid credentials.")
+            return LoginMutation(payload=None, errors=["Invalid credentials."])
+        
+        if user.is_suspended:
+            reason = getattr(user, 'suspension_reason', 'No reason provided.')
+            logger.warning(f"Login failed for email {email}: Account suspended. Reason: {reason}")
+            return LoginMutation(payload=None, errors=[f"Account is suspended. Reason: {reason}"])
+
+        # Check if any MFA method is active
+        is_mfa_active = user.mfa_totp_setup_complete or user.mfa_email_enabled or user.mfa_sms_enabled
+
+        if not is_mfa_active:
+            # No MFA enabled, log the user in directly.
+            auth_data = create_auth_payload(user)
+            return LoginMutation(payload=AuthPayloadType(**auth_data))
+
+        # MFA is active, so we start the two-step challenge.
+        
+        # 1. Send OTPs if Email or SMS MFA are enabled.
+        if user.mfa_email_enabled or user.mfa_sms_enabled:
+            otp = generate_otp()
+            set_user_otp(user, otp)  # Hashes and saves OTP to the user model
+            
+            message_context = f"Your AfyaFlow verification code is: {otp}"
+            if user.mfa_email_enabled:
+                send_templated_email(
+                    recipient=user.email,
+                    template_id='mfa_otp',
+                    context={"first_name": user.first_name or "user", "otp_code": otp}
+                )
+            if user.mfa_sms_enabled and user.phone_number_verified:
+                send_sms(recipient=user.phone_number, message=message_context)
+
+        # 2. Create a short-lived MFA token.
+        mfa_token, _ = create_token(user.id, token_type='mfa')
+
+        # 3. Return the MFA challenge to the client.
+        challenge = MfaChallengeType(
+            mfa_token=mfa_token,
+            message="MFA is required. Please submit an OTP to complete login."
+        )
+        logger.info(f"MFA challenge issued for user {user.email}.")
+        return LoginMutation(payload=challenge)
+
+class VerifyMfaMutation(graphene.Mutation):
+    """
+    Verifies an OTP code using a short-lived MFA token to complete the login process.
+    """
+    class Arguments:
+        mfa_token = graphene.String(required=True)
+        otp_code = graphene.String(required=True)
 
     auth_payload = graphene.Field(AuthPayloadType)
     errors = graphene.List(graphene.String)
 
     @classmethod
     @transaction.atomic
-    def mutate(cls, root, info, email, password, organization_id=None, mfa_code=None):
-        user = authenticate(email=email, password=password)
-        if not user:
-            logger.warning(f"Login failed for email {email}: Invalid credentials.")
-            return LoginMutation(auth_payload=None, errors=["Invalid credentials."])
-        
-        if user.is_suspended:
-            reason = getattr(user, 'suspension_reason', 'No reason provided.')
-            logger.warning(f"Login failed for email {email}: Account suspended. Reason: {reason}")
-            return LoginMutation(auth_payload=None, errors=[f"Account is suspended. Reason: {reason}"])
+    def mutate(cls, root, info, mfa_token, otp_code):
+        # 1. Validate the MFA token
+        jwt_authenticator = JWTAuthentication()
+        try:
+            user, payload = jwt_authenticator.authenticate_mfa_token(mfa_token)
+        except Exception as e:
+            return cls(auth_payload=None, errors=[str(e)])
 
-        # MFA Check for TOTP
+        # 2. Check if the token was for MFA
+        if payload.get('type') != 'mfa':
+            return cls(auth_payload=None, errors=["Invalid token type provided."])
+
+        # 3. Verify the provided OTP code
+        is_valid = False
+        
+        # Check TOTP from authenticator app
         if user.mfa_totp_setup_complete:
-            if not mfa_code:
-                return LoginMutation(auth_payload=None, errors=["MFA code is required."])
-            import pyotp
             totp = pyotp.TOTP(user.mfa_totp_secret)
-            if not totp.verify(mfa_code):
-                logger.warning(f"Login failed for email {email}: Invalid MFA code.")
-                return LoginMutation(auth_payload=None, errors=["Invalid MFA code."])
+            if totp.verify(otp_code):
+                is_valid = True
 
-        # Log user into Django session
+        # If not valid yet, check Email/SMS OTP
+        if not is_valid and (user.mfa_email_enabled or user.mfa_sms_enabled):
+            if user.mfa_otp and user.mfa_otp_expires_at and timezone.now() < user.mfa_otp_expires_at:
+                if verify_otp(otp_code, user.mfa_otp):
+                    is_valid = True
+                    # Invalidate the one-time code immediately after use
+                    user.mfa_otp = None
+                    user.mfa_otp_expires_at = None
+                    user.save(update_fields=['mfa_otp', 'mfa_otp_expires_at'])
+
+        if not is_valid:
+            logger.warning(f"MFA verification failed for user {user.email}: Invalid OTP code.")
+            return cls(auth_payload=None, errors=["Invalid OTP code."])
+
+        # 4. Success! Log the user in and return the full auth payload.
         django_login(info.context, user)
-        logger.info(f"User {email} logged in successfully.")
-        
-        auth_data = create_auth_payload(user, organization_id=organization_id)
-        org_context_instance = OrganizationStub(id=organization_id) if organization_id else None
-        
-        auth_payload_instance = AuthPayloadType(
-            **auth_data,
-            organization_context=org_context_instance
-        )
-        
-        return LoginMutation(auth_payload=auth_payload_instance, errors=None)
+        logger.info(f"User {user.email} successfully completed MFA and logged in.")
+        auth_data = create_auth_payload(user)
+        return cls(auth_payload=AuthPayloadType(**auth_data))
 
 class RefreshTokenMutation(graphene.Mutation):
     """Refreshes a user's access token."""
