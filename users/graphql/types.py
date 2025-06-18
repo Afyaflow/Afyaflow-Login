@@ -51,6 +51,16 @@ class OrganizationMembershipInfoType(graphene.ObjectType):
     name = graphene.String(required=True, description="The name of the organization.")
     # Imight include the user's role in this organization.
 
+class MfaChallengeType(graphene.ObjectType):
+    """Indicates that a Multi-Factor Authentication challenge has been issued."""
+    mfa_required = graphene.Boolean(default_value=True, description="Confirms that MFA is required.")
+    mfa_token = graphene.String(description="A short-lived token to be used in the verifyMfa mutation.")
+    message = graphene.String(description="A message to the user, e.g., indicating where OTPs were sent.")
+
+class LoginPayload(graphene.Union):
+    class Meta:
+        types = (AuthPayloadType, MfaChallengeType)
+
 class AuthPayloadType(graphene.ObjectType):
     """Payload returned after successful authentication (login or register)."""
     user = graphene.Field(UserType, description="The authenticated user object.")
