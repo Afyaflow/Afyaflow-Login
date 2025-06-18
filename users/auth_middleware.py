@@ -1,5 +1,7 @@
-from users.authentication import JWTAuthentication
+from django.utils.functional import SimpleLazyObject
+from .authentication import JSONWebTokenAuthentication
 from django.contrib.auth.models import AnonymousUser
+from promise import Promise
 import logging
 
 logger = logging.getLogger(__name__)
@@ -9,34 +11,26 @@ class GraphQLJWTMiddleware:
     Custom Django middleware to handle JWT-based authentication for the GraphQL endpoint.
     This version ensures the JWT-authenticated user is consistently used.
     """
-    def __init__(self, get_response):
+    def __init__(self, get_response=None):
         self.get_response = get_response
-        self.jwt_authenticator = JWTAuthentication()
+        self.authenticator = JSONWebTokenAuthentication()
 
     def __call__(self, request):
-        # By default, request.user is an AnonymousUser.
-        # Django's standard AuthenticationMiddleware might run and attach a 
-        # session-based user. We want our JWT user to be definitive.
-        
-        # We wrap the authentication in a property on the request itself.
-        # This is a robust pattern used by libraries like Django Rest Framework.
-        # It defers authentication until `request.user` is accessed.
-        request.user = self.LazyUser(self.jwt_authenticator, request)
-        
-        response = self.get_response(request)
-        return response
+        request.user = SimpleLazyObject(lambda: self.get_user(request))
+        return self.get_response(request)
 
-    class LazyUser:
-        def __init__(self, authenticator, request):
-            self._authenticator = authenticator
-            self._request = request
-            self._user = None
+    def get_user(self, request):
+        auth_response = self.authenticator.authenticate(request)
+        if auth_response:
+            user, _ = auth_response
+            return user
+        return AnonymousUser()
 
-        def __get__(self, request, obj_type=None):
-            if self._user is None:
-                auth_response = self._authenticator.authenticate(self._request)
-                if auth_response:
-                    self._user = auth_response[0]
-                else:
-                    self._user = AnonymousUser()
-            return self._user 
+    def resolve(self, next, root, info, **kwargs):
+        context = info.context
+        
+        # Use a lazy object to avoid authenticating on every request
+        # The user will only be fetched if it's accessed in a resolver
+        context.user = SimpleLazyObject(lambda: self.get_user(context))
+
+        return next(root, info, **kwargs) 
