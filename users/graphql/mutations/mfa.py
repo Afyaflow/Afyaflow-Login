@@ -6,6 +6,7 @@ import base64
 from graphql import GraphQLError
 from ...communication_client import send_templated_email, send_sms
 from ...otp_utils import generate_otp, set_user_otp, verify_otp
+from ...models import User
 import logging
 from django.db import transaction
 from django.utils import timezone
