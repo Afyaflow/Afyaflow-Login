@@ -264,3 +264,41 @@ class VerifyPhoneNumberMutation(graphene.Mutation):
 
         logger.info(f"Phone number successfully verified for user {user.email}.")
         return cls(ok=True)
+
+class ToggleSmsMfaMutation(graphene.Mutation):
+    """
+    Enables or disables MFA via SMS for the authenticated user,
+    provided they have a verified phone number.
+    """
+    class Arguments:
+        enable = graphene.Boolean(required=True)
+
+    ok = graphene.Boolean()
+    errors = graphene.List(graphene.String)
+
+    @classmethod
+    def mutate(cls, root, info, enable):
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("You must be logged in to manage MFA.")
+
+        if enable and not user.phone_number_verified:
+            return cls(ok=False, errors=["You must have a verified phone number to enable SMS MFA."])
+
+        user.mfa_sms_enabled = enable
+        user.save(update_fields=['mfa_sms_enabled'])
+
+        # Optionally, send a notification email about the change
+        if not enable:
+            try:
+                context = {"first_name": user.first_name or "user"}
+                send_templated_email(
+                    recipient=user.email,
+                    template_id='mfa_disabled', # Reusing for now
+                    context=context
+                )
+            except Exception as e:
+                logger.error(f"Failed to send MFA SMS status change email for {user.email}: {e}")
+
+        logger.info(f"SMS MFA has been {'enabled' if enable else 'disabled'} for user {user.email}.")
+        return cls(ok=True)
