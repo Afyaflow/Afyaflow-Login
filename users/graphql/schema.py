@@ -1,7 +1,7 @@
 import graphene
 from graphene_federation import LATEST_VERSION, build_schema
 
-from .queries import UserQuery
+# Import mutations first
 from .mutations.auth import (
     RegisterMutation,
     LoginMutation,
@@ -25,6 +25,10 @@ from .mutations.mfa import (
     VerifyPhoneNumberMutation,
     ToggleSmsMfaMutation,
 )
+
+# Then import queries
+from .queries import UserQuery
+
 
 class UserMutation(graphene.ObjectType):
     """Root mutation for user-related actions."""
