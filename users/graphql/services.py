@@ -100,9 +100,46 @@ def get_user_organization_memberships(user_id: str) -> list:
     return organizations
 
 
+def _claim_pending_invitations(user: User):
+    """
+    Finds pending organization memberships for the user's email and updates them with their user ID.
+    This effectively "claims" the invitation upon login.
+    """
+    mutation = """
+        mutation ClaimInvitations($email: String!, $userId: String!, $joinedAt: String!) {
+            updateManyOrganizationMembership(
+                where: {
+                    email: { equals: $email },
+                    userId: { equals: null },
+                    inviteStatus: { equals: PENDING }
+                },
+                data: {
+                    userId: { set: $userId },
+                    inviteStatus: { set: CONFIRMED },
+                    joinedAt: { set: $joinedAt }
+                }
+            ) {
+                count
+            }
+        }
+    """
+    # The `joinedAt` field should be the current time in ISO 8601 format.
+    joined_at_iso = timezone.now().isoformat()
+    variables = {"email": user.email, "userId": str(user.id), "joinedAt": joined_at_iso}
+
+    response_data = _execute_org_service_query(mutation, variables)
+    
+    if response_data and not response_data.get('errors'):
+        count = response_data.get('data', {}).get('updateManyOrganizationMembership', {}).get('count', 0)
+        if count > 0:
+            logger.info(f"Successfully claimed {count} pending organization invitations for user {user.email}.")
+    else:
+        logger.error(f"Failed to claim pending invitations for user {user.email}. Error: {response_data.get('errors')}")
+
+
 def create_auth_payload(user):
     """
-    Creates JWTs and saves the refresh token.
+    Creates JWTs, saves the refresh token, and claims pending org invitations.
     """
     access_token_str, _ = create_token(user.id, token_type='access')
     refresh_token_str, refresh_expires_at = create_token(user.id, token_type='refresh')
@@ -119,7 +156,10 @@ def create_auth_payload(user):
 
     logger.info(f"Successfully created tokens for user {user.email}")
     
-    # Always fetch the user's organization memberships on login
+    # Claim any pending invitations for this user's email
+    _claim_pending_invitations(user)
+
+    # Now, fetch the user's organization memberships (including newly claimed ones)
     organization_memberships_data = get_user_organization_memberships(user.id)
 
     payload = {
