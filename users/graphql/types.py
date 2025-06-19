@@ -56,8 +56,6 @@ class AuthPayloadType(graphene.ObjectType):
     user = graphene.Field(UserType, description="The authenticated user object.")
     access_token = graphene.String(name="accessToken", description="JWT access token for authenticated requests.")
     refresh_token = graphene.String(name="refreshToken", description="JWT refresh token to obtain new access tokens.")
-    organization_context_token = graphene.String(name="organizationContextToken", required=False, description="JWT containing the user's context and permissions within a selected organization.")
-    organization_context = graphene.Field(OrganizationStub, name="organizationContext", required=False, description="Context of the organization if specified. Resolved by the Organization service.")
     organization_memberships = graphene.List(OrganizationMembershipType, name="organizationMemberships", required=False, description="A list of organizations the user is a member of.")
     errors = graphene.List(graphene.String, description="List of error messages if any operation within the mutation fails.") # Added to Login, Register
 

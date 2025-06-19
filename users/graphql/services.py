@@ -100,10 +100,9 @@ def get_user_organization_memberships(user_id: str) -> list:
     return organizations
 
 
-def create_auth_payload(user, organization_id=None):
+def create_auth_payload(user):
     """
     Creates JWTs and saves the refresh token.
-    If organization_id is provided, it also creates an Organization Context Token.
     """
     access_token_str, _ = create_token(user.id, token_type='access')
     refresh_token_str, refresh_expires_at = create_token(user.id, token_type='refresh')
@@ -129,16 +128,6 @@ def create_auth_payload(user, organization_id=None):
         "refresh_token": refresh_token_str,
         "organization_memberships": organization_memberships_data,
     }
-
-    if organization_id:
-        permissions = get_organization_permissions(user.id, organization_id)
-        if permissions:
-            oct_token_str, _ = create_oct_token(user.id, organization_id, permissions)
-            payload["organization_context_token"] = oct_token_str
-            logger.info(f"Successfully created OCT for user {user.email} in organization {organization_id}")
-        else:
-            logger.warning(f"Could not create OCT for user {user.email}: No permissions found for organization {organization_id}")
-
 
     return payload
 

@@ -272,14 +272,13 @@ class LoginWithGoogleMutation(graphene.Mutation):
     """Logs in a user using their Google account."""
     class Arguments:
         id_token = graphene.String(required=True)
-        organization_id = graphene.UUID(required=False, name="organizationId")
 
     auth_payload = graphene.Field(AuthPayloadType)
     errors = graphene.List(graphene.String)
 
     @classmethod
     @transaction.atomic
-    def mutate(cls, root, info, id_token, organization_id=None):
+    def mutate(cls, root, info, id_token):
         try:
             google_auth = GoogleAuthService(id_token)
             token_info = google_auth.validate_token()
@@ -287,25 +286,17 @@ class LoginWithGoogleMutation(graphene.Mutation):
 
             if not user.is_active:
                 logger.warning(f"Google login failed for {user.email}: User account is not active.")
-                return LoginWithGoogleMutation(errors=["User account is not active."])
+                return cls(auth_payload=None, errors=["Your account is not active."])
             
-            # Log user into Django session
-            django_login(info.context, user, backend='django.contrib.auth.backends.ModelBackend')
+            django_login(info.context, user, backend='allauth.account.auth_backends.AuthenticationBackend')
             
-            auth_data = create_auth_payload(user, organization_id=organization_id)
-            org_context_instance = OrganizationStub(id=organization_id) if organization_id else None
+            auth_data = create_auth_payload(user)
             
-            auth_payload_instance = AuthPayloadType(
-                **auth_data,
-                organization_context=org_context_instance
-            )
-            
-            logger.info(f"Google login successful for user {user.email}")
-            return LoginWithGoogleMutation(auth_payload=auth_payload_instance, errors=None)
+            return cls(auth_payload=AuthPayloadType(**auth_data))
 
         except ValueError as e:
             logger.error(f"Google login failed: {e}")
-            return LoginWithGoogleMutation(errors=[str(e)])
+            return cls(auth_payload=None, errors=[str(e)])
         except Exception as e:
-            logger.exception(f"An unexpected error occurred during Google login: {e}")
-            return LoginWithGoogleMutation(errors=[f"An unexpected error occurred: {str(e)}"])
+            logger.error(f"An unexpected error occurred during Google login: {e}")
+            return cls(auth_payload=None, errors=["An unexpected server error occurred."])
