@@ -7,7 +7,7 @@ from django.utils import timezone
 from graphql import GraphQLError
 
 from ..types import AuthPayloadType, OrganizationStub, MfaChallengeType, LoginPayload, ScopedAuthPayload, GetScopedAccessTokenPayload
-from ..services import GoogleAuthService, create_auth_payload
+from ..services import GoogleAuthService, create_auth_payload, get_user_organization_memberships
 from ...models import RefreshToken, User
 from ...serializers import UserRegistrationSerializer
 from ...authentication import create_token, JWTAuthentication, create_oct_token
@@ -247,11 +247,19 @@ class GetScopedAccessToken(graphene.Mutation):
         if not user.is_authenticated:
             return cls(payload=None, errors=["You must be logged in to perform this action."])
 
-        # 2. Create the Organization Context Token (OCT)
+        # 2. Verify user is a member of the requested organization
+        memberships = get_user_organization_memberships(user.id)
+        org_ids = [str(membership.get('id')) for membership in memberships]
+
+        if str(organization_id) not in org_ids:
+            logger.warning(f"Security risk: User {user.id} attempted to get OCT for org {organization_id} they are not a member of.")
+            return cls(payload=None, errors=["You do not have permission to access this organization."])
+
+        # 3. Create the Organization Context Token (OCT)
         oct_token_str, _ = create_oct_token(user.id, organization_id)
         logger.info(f"Successfully created OCT for user {user.email} in organization {organization_id}")
 
-        # 3. Construct the payload
+        # 4. Construct the payload
         scoped_payload = ScopedAuthPayload(
             oct=oct_token_str,
             user=user
