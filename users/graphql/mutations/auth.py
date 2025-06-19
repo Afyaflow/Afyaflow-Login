@@ -10,7 +10,7 @@ from ..types import AuthPayloadType, OrganizationStub, MfaChallengeType, LoginPa
 from ..services import GoogleAuthService, create_auth_payload
 from ...models import RefreshToken, User
 from ...serializers import UserRegistrationSerializer
-from ...authentication import create_token, JWTAuthentication
+from ...authentication import create_token, JWTAuthentication, create_oct_token
 from ...communication_client import send_templated_email, send_sms
 from ...otp_utils import generate_otp, set_user_otp, verify_otp
 import pyotp
