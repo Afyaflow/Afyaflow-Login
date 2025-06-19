@@ -30,11 +30,6 @@ class ScopedAuthPayload(graphene.ObjectType):
     oct = graphene.String(required=True, name="organizationContextToken", description="JWT containing the user's context and permissions for the selected organization.")
     user = graphene.Field(lambda: UserType, required=True)
 
-    def resolve_user(self, info):
-        # This resolver will be called by the gateway after it resolves the user from the auth service.
-        # The user object is expected to be on the root of the resolved object from the upstream service.
-        return self
-
 class OrganizationStub(graphene.ObjectType):
     """Represents an Organization entity, resolved by the Organization subgraph."""
     id = graphene.UUID(required=True, description="The unique identifier of the organization.")
