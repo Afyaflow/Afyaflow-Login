@@ -249,7 +249,11 @@ class GetScopedAccessToken(graphene.Mutation):
 
         # 2. Verify user is a member of the requested organization
         memberships = get_user_organization_memberships(user.id)
-        org_ids = [str(membership.get('id')) for membership in memberships]
+        org_ids = [
+            str(membership.get('organization', {}).get('id'))
+            for membership in memberships
+            if membership.get('organization')
+        ]
 
         if str(organization_id) not in org_ids:
             logger.warning(f"Security risk: User {user.id} attempted to get OCT for org {organization_id} they are not a member of.")
