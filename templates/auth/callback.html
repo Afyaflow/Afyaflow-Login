@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication Successful</title>
+    <style>
+        body { font-family: sans-serif; padding: 2em; }
+        .token { word-break: break-all; background-color: #f0f0f0; padding: 1em; border-radius: 5px; margin-bottom: 1em; }
+    </style>
+</head>
+<body>
+    <h1>Authentication Successful</h1>
+    <p>You can now use these tokens to access the API.</p>
+    
+    <h2>Access Token</h2>
+    <div class="token">{{ tokens.access }}</div>
+
+    <h2>Refresh Token</h2>
+    <div class="token">{{ tokens.refresh }}</div>
+    
+</body>
+</html> 

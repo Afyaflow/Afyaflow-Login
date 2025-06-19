@@ -64,6 +64,7 @@ INSTALLED_APPS = [
     'graphene_django',
     # Local apps
     'users',
+    'users.social_auth.apps.SocialAuthAppConfig',
     # Allauth apps
     'allauth',
     'allauth.account',
@@ -90,7 +91,7 @@ ROOT_URLCONF = 'afyaflow_auth.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [os.path.join(BASE_DIR, 'templates')],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -241,3 +242,4 @@ EMAIL_SERVICE_URL = os.getenv('EMAIL_SERVICE_URL')
 
 # Google OAuth Client ID
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_OAUTH_CLIENT_ID') 
+GOOGLE_OAUTH_CLIENT_SECRET = os.getenv('GOOGLE_OAUTH_CLIENT_SECRET')
