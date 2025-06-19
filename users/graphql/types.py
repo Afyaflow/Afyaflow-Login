@@ -28,7 +28,6 @@ class UserType(DjangoObjectType):
 class ScopedAuthPayload(graphene.ObjectType):
     """Payload containing the Organization Context Token (OCT) and permissions for a specific organization."""
     oct = graphene.String(required=True, name="organizationContextToken", description="JWT containing the user's context and permissions for the selected organization.")
-    permissions = graphene.List(graphene.String, required=True, description="A list of permission strings granted to the user in the context of the selected organization.")
     user = graphene.Field(lambda: UserType, required=True)
 
     def resolve_user(self, info):

@@ -247,22 +247,13 @@ class GetScopedAccessToken(graphene.Mutation):
         if not user.is_authenticated:
             return cls(payload=None, errors=["You must be logged in to perform this action."])
 
-        # 2. The `permissions` are expected to be resolved by the Gateway and passed in the `root`.
-        # This is a placeholder for the actual key the gateway will use. We'll confirm this later.
-        permissions = getattr(root, 'permissions', None)
-        if permissions is None:
-            # This case should ideally not be hit if the gateway is configured correctly.
-            logger.error(f"Permissions not resolved by gateway for user {user.id} and org {organization_id}")
-            return cls(payload=None, errors=["Could not retrieve permissions for the specified organization."])
-            
-        # 3. Create the Organization Context Token (OCT)
-        oct_token_str, _ = create_oct_token(user.id, organization_id, permissions)
+        # 2. Create the Organization Context Token (OCT)
+        oct_token_str, _ = create_oct_token(user.id, organization_id)
         logger.info(f"Successfully created OCT for user {user.email} in organization {organization_id}")
 
-        # 4. Construct the payload
+        # 3. Construct the payload
         scoped_payload = ScopedAuthPayload(
             oct=oct_token_str,
-            permissions=permissions,
             user=user
         )
         

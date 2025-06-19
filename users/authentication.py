@@ -117,7 +117,7 @@ def create_token(user_id: str, token_type: str = 'access') -> Tuple[str, datetim
     return token, expires_at
 
 
-def create_oct_token(user_id: str, organization_id: str, permissions: list) -> Tuple[str, datetime]:
+def create_oct_token(user_id: str, organization_id: str) -> Tuple[str, datetime]:
     """
     Create a new Organization Context Token (OCT) for the given user and organization.
     """
@@ -129,7 +129,6 @@ def create_oct_token(user_id: str, organization_id: str, permissions: list) -> T
     payload = {
         'sub': str(user_id),  # subject (user id)
         'org_id': str(organization_id), # organization id
-        'permissions': permissions, # user's permissions in the organization
         'type': 'oct',
         'iat': now.timestamp(),  # issued at
         'exp': expires_at.timestamp(),  # expiration time
