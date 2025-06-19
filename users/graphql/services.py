@@ -115,7 +115,7 @@ def _claim_pending_invitations(user: User):
                 },
                 data: {
                     userId: { set: $userId },
-                    inviteStatus: { set: CONFIRMED }
+                    inviteStatus: { set: ACCEPTED }
                 }
             ) {
                 count
