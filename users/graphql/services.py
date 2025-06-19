@@ -106,7 +106,7 @@ def _claim_pending_invitations(user: User):
     This effectively "claims" the invitation upon login.
     """
     mutation = """
-        mutation ClaimInvitations($email: String!, $userId: String!, $joinedAt: DateTime!) {
+        mutation ClaimInvitations($email: String!, $userId: String!) {
             updateManyOrganizationMembership(
                 where: {
                     email: { equals: $email },
@@ -115,17 +115,14 @@ def _claim_pending_invitations(user: User):
                 },
                 data: {
                     userId: { set: $userId },
-                    inviteStatus: { set: CONFIRMED },
-                    joinedAt: { set: $joinedAt }
+                    inviteStatus: { set: CONFIRMED }
                 }
             ) {
                 count
             }
         }
     """
-    # The `joinedAt` field should be the current time in ISO 8601 format.
-    joined_at_iso = timezone.now().isoformat()
-    variables = {"email": user.email, "userId": str(user.id), "joinedAt": joined_at_iso}
+    variables = {"email": user.email, "userId": str(user.id)}
 
     response_data = _execute_org_service_query(mutation, variables)
     
