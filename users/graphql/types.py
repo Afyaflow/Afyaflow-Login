@@ -25,6 +25,17 @@ class UserType(DjangoObjectType):
         except User.DoesNotExist:
             return None
 
+class ScopedAuthPayload(graphene.ObjectType):
+    """Payload containing the Organization Context Token (OCT) and permissions for a specific organization."""
+    oct = graphene.String(required=True, name="organizationContextToken", description="JWT containing the user's context and permissions for the selected organization.")
+    permissions = graphene.List(graphene.String, required=True, description="A list of permission strings granted to the user in the context of the selected organization.")
+    user = graphene.Field(lambda: UserType, required=True)
+
+    def resolve_user(self, info):
+        # This resolver will be called by the gateway after it resolves the user from the auth service.
+        # The user object is expected to be on the root of the resolved object from the upstream service.
+        return self
+
 class OrganizationStub(graphene.ObjectType):
     """Represents an Organization entity, resolved by the Organization subgraph."""
     id = graphene.UUID(required=True, description="The unique identifier of the organization.")
@@ -59,3 +70,10 @@ class MfaChallengeType(graphene.ObjectType):
 class LoginPayload(graphene.Union):
     class Meta:
         types = (AuthPayloadType, MfaChallengeType)
+
+class GetScopedAccessTokenPayload(graphene.Union):
+    """Defines the possible return types for the getScopedAccessToken mutation."""
+    class Meta:
+        types = (ScopedAuthPayload,)
+        # In the future, we can add custom error types here.
+        # e.g. types = (ScopedAuthPayload, PermissionsError, InvalidOrganizationError)

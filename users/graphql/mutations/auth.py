@@ -6,7 +6,7 @@ from django.conf import settings
 from django.utils import timezone
 from graphql import GraphQLError
 
-from ..types import AuthPayloadType, OrganizationStub, MfaChallengeType, LoginPayload
+from ..types import AuthPayloadType, OrganizationStub, MfaChallengeType, LoginPayload, ScopedAuthPayload, GetScopedAccessTokenPayload
 from ..services import GoogleAuthService, create_auth_payload
 from ...models import RefreshToken, User
 from ...serializers import UserRegistrationSerializer
@@ -228,6 +228,45 @@ class LogoutMutation(graphene.Mutation):
         except RefreshToken.DoesNotExist:
             logger.warning("Logout failed: Invalid or already revoked refresh token.")
             return LogoutMutation(ok=False, errors=["Invalid or already revoked refresh token."])
+
+class GetScopedAccessToken(graphene.Mutation):
+    """
+    Given a valid identity token and an organization ID, returns an
+    Organization Context Token (OCT) scoped with that organization's permissions.
+    """
+    class Arguments:
+        organization_id = graphene.UUID(required=True, name="organizationId")
+
+    payload = graphene.Field(GetScopedAccessTokenPayload)
+    errors = graphene.List(graphene.String)
+
+    @classmethod
+    def mutate(cls, root, info, organization_id):
+        # 1. User must be authenticated
+        user = info.context.user
+        if not user.is_authenticated:
+            return cls(payload=None, errors=["You must be logged in to perform this action."])
+
+        # 2. The `permissions` are expected to be resolved by the Gateway and passed in the `root`.
+        # This is a placeholder for the actual key the gateway will use. We'll confirm this later.
+        permissions = getattr(root, 'permissions', None)
+        if permissions is None:
+            # This case should ideally not be hit if the gateway is configured correctly.
+            logger.error(f"Permissions not resolved by gateway for user {user.id} and org {organization_id}")
+            return cls(payload=None, errors=["Could not retrieve permissions for the specified organization."])
+            
+        # 3. Create the Organization Context Token (OCT)
+        oct_token_str, _ = create_oct_token(user.id, organization_id, permissions)
+        logger.info(f"Successfully created OCT for user {user.email} in organization {organization_id}")
+
+        # 4. Construct the payload
+        scoped_payload = ScopedAuthPayload(
+            oct=oct_token_str,
+            permissions=permissions,
+            user=user
+        )
+        
+        return cls(payload=scoped_payload)
 
 class LoginWithGoogleMutation(graphene.Mutation):
     """Logs in a user using their Google account."""

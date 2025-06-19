@@ -9,6 +9,7 @@ from .mutations.auth import (
     RefreshTokenMutation,
     LogoutMutation,
     LoginWithGoogleMutation,
+    GetScopedAccessToken,
 )
 from .mutations.profile import (
     UpdateProfileMutation,
@@ -38,6 +39,7 @@ class UserMutation(graphene.ObjectType):
     refresh_token = RefreshTokenMutation.Field()
     logout = LogoutMutation.Field()
     login_with_google = LoginWithGoogleMutation.Field(description="Logs in or registers a user using a Google ID Token.")
+    get_scoped_access_token = GetScopedAccessToken.Field(description="Issues an Organization Context Token (OCT) for a specific organization.")
     
     update_profile = UpdateProfileMutation.Field()
     change_password = ChangePasswordMutation.Field()

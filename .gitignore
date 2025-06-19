@@ -57,3 +57,5 @@ auth-test-ui/.env.production.local
 /SOCIAL_AUTH_IMPLEMENTATION_GUIDE.md
 /CIRCULAR_IMPORT_FIXES.md
 /graphql-gateway/ 
+/organizations/
+/email-service/
