@@ -89,15 +89,8 @@ def get_user_organization_memberships(user_id: str) -> list:
 
     memberships = response_data.get('data', {}).get('organizationMemberships', [])
     
-    # Extract just the organization data from the membership object
-    organizations = [
-        membership['organization'] 
-        for membership in memberships 
-        if 'organization' in membership
-    ]
-    
-    logger.info(f"Fetched {len(organizations)} organization memberships for user {user_id}")
-    return organizations
+    logger.info(f"Fetched {len(memberships)} organization memberships for user {user_id}")
+    return memberships
 
 
 def _claim_pending_invitations(user: User):
