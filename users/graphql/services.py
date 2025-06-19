@@ -106,7 +106,7 @@ def _claim_pending_invitations(user: User):
     This effectively "claims" the invitation upon login.
     """
     mutation = """
-        mutation ClaimInvitations($email: String!, $userId: String!, $joinedAt: String!) {
+        mutation ClaimInvitations($email: String!, $userId: String!, $joinedAt: DateTime!) {
             updateManyOrganizationMembership(
                 where: {
                     email: { equals: $email },
