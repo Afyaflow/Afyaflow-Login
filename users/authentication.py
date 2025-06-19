@@ -14,6 +14,7 @@ class JWTAuthentication(authentication.BaseAuthentication):
     def authenticate(self, request) -> Optional[Tuple[User, dict]]:
         # Get the Authorization header
         auth_header = request.headers.get('Authorization')
+        print(f"DEBUG: Incoming Authorization Header from Gateway: {auth_header}")
         if not auth_header:
             return None
 
