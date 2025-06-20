@@ -30,12 +30,23 @@ class SocialLoginInitiateView(View):
             # 2. Store them in the session
             request.session['oauth_state'] = state
             request.session['oauth_pkce_verifier'] = code_verifier
+            
+            # Force session save and ensure session key exists
+            if not request.session.session_key:
+                request.session.create()
             request.session.save()
+            
+            # Log session details for debugging
+            logger.info(f"Session created: ID={request.session.session_key}, State={state[:10]}...")
+            logger.info(f"Session cookie settings: Domain={settings.SESSION_COOKIE_DOMAIN}, Secure={settings.SESSION_COOKIE_SECURE}")
 
             # 3. Build the authorization URL
             auth_url = "https://accounts.google.com/o/oauth2/v2/auth"
             client_id = settings.GOOGLE_CLIENT_ID
             redirect_uri = request.build_absolute_uri(reverse('social_auth:callback', args=[provider]))
+            
+            # Log the redirect URI for debugging
+            logger.info(f"Redirect URI: {redirect_uri}")
             
             params = {
                 'client_id': client_id,
@@ -51,7 +62,9 @@ class SocialLoginInitiateView(View):
             
             full_auth_url = f"{auth_url}?{requests.compat.urlencode(params)}"
             logger.info(f"Redirecting user to Google for authentication.")
-            return redirect(full_auth_url)
+            
+            response = redirect(full_auth_url)
+            return response
             
         else:
             logger.error(f"Provider '{provider}' not supported.")
@@ -69,8 +82,20 @@ class SocialLoginCallbackView(View):
             received_state = request.GET.get('state')
             session_state = request.session.get('oauth_state')
 
+            # Enhanced logging for debugging state mismatch issues
+            logger.info(f"Callback received: Session ID={request.session.session_key}")
+            logger.info(f"Headers: X-Forwarded-Proto={request.META.get('HTTP_X_FORWARDED_PROTO')}, Host={request.META.get('HTTP_HOST')}")
+            logger.info(f"Session data exists: {bool(session_state)}")
+            logger.info(f"Received state: {received_state[:10] if received_state else 'None'}")
+            logger.info(f"Session state: {session_state[:10] if session_state else 'None'}")
+            
+            # Log all cookies for debugging
+            logger.info(f"Cookies: {request.COOKIES}")
+
             if not StateManager.validate_state(session_state, received_state):
                 logger.warning("Social login state validation failed.")
+                logger.warning(f"Full received state: {received_state}")
+                logger.warning(f"Full session state: {session_state}")
                 return redirect('/?error=state-mismatch')
             
             code_verifier = request.session.get('oauth_pkce_verifier')

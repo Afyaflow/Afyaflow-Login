@@ -64,7 +64,6 @@ INSTALLED_APPS = [
     'graphene_django',
     # Local apps
     'users',
-    'users.social_auth.apps.SocialAuthAppConfig',
     # Allauth apps
     'allauth',
     'allauth.account',
@@ -182,8 +181,8 @@ ACCOUNT_SIGNUP_FIELDS = ['email'] # For programmatic use
 ACCOUNT_EMAIL_VERIFICATION = 'optional' 
 ACCOUNT_LOGIN_ON_EMAIL_CONFIRMATION = True # Logs user in after email confirmation
 ACCOUNT_LOGIN_ON_PASSWORD_RESET = True # Logs user in after password reset
-# LOGIN_REDIRECT_URL = '/'  # Or frontend URL where user is redirected after login
-# ACCOUNT_LOGOUT_REDIRECT_URL = '/'
+LOGIN_REDIRECT_URL = '/'
+ACCOUNT_LOGOUT_REDIRECT_URL = '/'
 SOCIALACCOUNT_ADAPTER = 'allauth.socialaccount.adapter.DefaultSocialAccountAdapter'
 ACCOUNT_ADAPTER = 'allauth.account.adapter.DefaultAccountAdapter'
 # Ensure our user model's email field is used as the username
@@ -250,7 +249,14 @@ SESSION_COOKIE_SECURE = not DEBUG  # Use secure cookies in production
 CSRF_COOKIE_SECURE = not DEBUG     # Use secure CSRF cookies in production
 SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Trust the "X-Forwarded-Proto" header from the reverse proxy (Railway)
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 USE_X_FORWARDED_HOST = True
+USE_X_FORWARDED_PORT = True
+
+# Session cookie settings
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_AGE = 86400  # 24 hours in seconds
+SESSION_COOKIE_DOMAIN = None  # Let Django set it automatically based on the request
+SESSION_COOKIE_PATH = '/'  # Make cookies available for all paths
