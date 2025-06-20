@@ -250,3 +250,7 @@ SESSION_COOKIE_SECURE = not DEBUG  # Use secure cookies in production
 CSRF_COOKIE_SECURE = not DEBUG     # Use secure CSRF cookies in production
 SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
+
+# Trust the "X-Forwarded-Proto" header from the reverse proxy (Railway)
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
