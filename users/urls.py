@@ -5,5 +5,4 @@ from django.urls import path, include
 urlpatterns = [
     #path('auth/google/', GoogleLoginView.as_view(), name='google-login'),
     #path('auth/logout/', LogoutView.as_view(), name='logout'),
-    path('social/', include('users.social_auth.urls')),  # Include social auth URLs
 ] 

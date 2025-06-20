@@ -253,10 +253,3 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Trust the "X-Forwarded-Proto" header from the reverse proxy (Railway)
 USE_X_FORWARDED_HOST = True
-USE_X_FORWARDED_PORT = True
-
-# Session cookie settings
-SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_AGE = 86400  # 24 hours in seconds
-SESSION_COOKIE_DOMAIN = None  # Let Django set it automatically based on the request
-SESSION_COOKIE_PATH = '/'  # Make cookies available for all paths

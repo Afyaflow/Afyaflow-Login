@@ -7,7 +7,6 @@ from rest_framework_simplejwt.tokens import RefreshToken
 import logging
 from django.utils import timezone
 from datetime import timedelta
-import urllib.parse
 
 from users.models import User
 from .utils import StateManager, PKCEManager
@@ -23,9 +22,6 @@ class SocialLoginInitiateView(View):
     """
     def get(self, request, provider):
         if provider == 'google':
-            # Get the redirect_to parameter if provided
-            redirect_to = request.GET.get('redirect_to', '/')
-            
             # 1. Generate state and PKCE parameters
             state = StateManager.generate_state()
             code_verifier = PKCEManager.generate_code_verifier()
@@ -34,24 +30,12 @@ class SocialLoginInitiateView(View):
             # 2. Store them in the session
             request.session['oauth_state'] = state
             request.session['oauth_pkce_verifier'] = code_verifier
-            request.session['oauth_redirect_to'] = redirect_to
-            
-            # Force session save and ensure session key exists
-            if not request.session.session_key:
-                request.session.create()
             request.session.save()
-            
-            # Log session details for debugging
-            logger.info(f"Session created: ID={request.session.session_key}, State={state[:10]}...")
-            logger.info(f"Session cookie settings: Domain={settings.SESSION_COOKIE_DOMAIN}, Secure={settings.SESSION_COOKIE_SECURE}")
 
             # 3. Build the authorization URL
             auth_url = "https://accounts.google.com/o/oauth2/v2/auth"
             client_id = settings.GOOGLE_CLIENT_ID
             redirect_uri = request.build_absolute_uri(reverse('social_auth:callback', args=[provider]))
-            
-            # Log the redirect URI for debugging
-            logger.info(f"Redirect URI: {redirect_uri}")
             
             params = {
                 'client_id': client_id,
@@ -67,9 +51,7 @@ class SocialLoginInitiateView(View):
             
             full_auth_url = f"{auth_url}?{requests.compat.urlencode(params)}"
             logger.info(f"Redirecting user to Google for authentication.")
-            
-            response = redirect(full_auth_url)
-            return response
+            return redirect(full_auth_url)
             
         else:
             logger.error(f"Provider '{provider}' not supported.")
@@ -86,52 +68,21 @@ class SocialLoginCallbackView(View):
             # --- Security Verification ---
             received_state = request.GET.get('state')
             session_state = request.session.get('oauth_state')
-            redirect_to = request.session.get('oauth_redirect_to', '/')
 
-            # Enhanced logging for debugging state mismatch issues
-            logger.info(f"Callback received: Session ID={request.session.session_key}")
-            logger.info(f"Headers: X-Forwarded-Proto={request.META.get('HTTP_X_FORWARDED_PROTO')}, Host={request.META.get('HTTP_HOST')}")
-            logger.info(f"Session data exists: {bool(session_state)}")
-            logger.info(f"Received state: {received_state[:10] if received_state else 'None'}")
-            logger.info(f"Session state: {session_state[:10] if session_state else 'None'}")
-            logger.info(f"Redirect destination: {redirect_to}")
-            
-            # Log all cookies for debugging
-            logger.info(f"Cookies: {request.COOKIES}")
-
-            # Check for error parameter from Google
-            if 'error' in request.GET:
-                error = request.GET.get('error')
-                logger.warning(f"Google OAuth returned an error: {error}")
-                return self.error_redirect(redirect_to, error)
-
-            # Handle missing state parameter - this happens when Google redirects without state
-            if received_state is None:
-                logger.warning("State parameter is missing in callback. This might be due to Google's redirect.")
-                
-                # Check if we have a code parameter - if so, we can try to proceed
-                if 'code' in request.GET and session_state:
-                    logger.info("Proceeding with authentication despite missing state parameter")
-                    # Continue with the flow - we'll skip state validation
-                else:
-                    logger.error("Missing both state and code parameters. Authentication cannot proceed.")
-                    return self.error_redirect(redirect_to, 'invalid-callback')
-            elif not StateManager.validate_state(session_state, received_state):
+            if not StateManager.validate_state(session_state, received_state):
                 logger.warning("Social login state validation failed.")
-                logger.warning(f"Full received state: {received_state}")
-                logger.warning(f"Full session state: {session_state}")
-                return self.error_redirect(redirect_to, 'state-mismatch')
+                return redirect('/?error=state-mismatch')
             
             code_verifier = request.session.get('oauth_pkce_verifier')
             if not code_verifier:
                 logger.warning("Social login code verifier not found in session.")
-                return self.error_redirect(redirect_to, 'pkce-error')
+                return redirect('/?error=pkce-error')
 
             # --- Token Exchange ---
             code = request.GET.get('code')
             if not code:
                 logger.warning("No authorization code provided in callback.")
-                return self.error_redirect(redirect_to, 'no-code')
+                return redirect('/?error=no-code')
 
             token_url = "https://oauth2.googleapis.com/token"
             redirect_uri = request.build_absolute_uri(reverse('social_auth:callback', args=[provider]))
@@ -151,9 +102,7 @@ class SocialLoginCallbackView(View):
                 token_data = token_response.json()
             except requests.RequestException as e:
                 logger.error(f"Failed to exchange authorization code for token: {e}")
-                if hasattr(e, 'response') and e.response:
-                    logger.error(f"Response content: {e.response.text}")
-                return self.error_redirect(redirect_to, 'token-exchange-failed')
+                return redirect('/?error=token-exchange-failed')
 
             # --- Fetch User Info ---
             userinfo_url = "https://www.googleapis.com/oauth2/v3/userinfo"
@@ -165,7 +114,7 @@ class SocialLoginCallbackView(View):
                 user_info = userinfo_response.json()
             except requests.RequestException as e:
                 logger.error(f"Failed to fetch user info from provider: {e}")
-                return self.error_redirect(redirect_to, 'userinfo-fetch-failed')
+                return redirect('/?error=userinfo-fetch-failed')
 
             # --- User and Social Account Sync ---
             user = self.sync_user_and_social_account(provider, user_info, token_data)
@@ -176,37 +125,13 @@ class SocialLoginCallbackView(View):
             # --- Cleanup and Redirect ---
             request.session.pop('oauth_state', None)
             request.session.pop('oauth_pkce_verifier', None)
-            request.session.pop('oauth_redirect_to', None)
             
-            # Check if we should use the template or redirect to frontend
-            if redirect_to == '/':
-                # Use the template for local testing
-                return render(request, 'auth/callback.html', {'tokens': tokens})
-            else:
-                # Redirect to frontend with tokens
-                return self.success_redirect(redirect_to, tokens)
+            # TODO: Redirect to a more robust frontend URL handler
+            return render(request, 'auth/callback.html', {'tokens': tokens})
             
         else:
             logger.error(f"Callback from unsupported provider '{provider}'.")
             return redirect('/?error=provider-not-supported')
-
-    def error_redirect(self, base_url, error_code):
-        """
-        Redirects to the frontend with an error code.
-        """
-        separator = '&' if '?' in base_url else '?'
-        return redirect(f"{base_url}{separator}error={error_code}")
-
-    def success_redirect(self, base_url, tokens):
-        """
-        Redirects to the frontend with authentication tokens.
-        """
-        params = {
-            'access_token': tokens['access'],
-            'refresh_token': tokens['refresh'],
-        }
-        separator = '&' if '?' in base_url else '?'
-        return redirect(f"{base_url}{separator}{urllib.parse.urlencode(params)}")
 
     def sync_user_and_social_account(self, provider, user_info, token_data):
         """
