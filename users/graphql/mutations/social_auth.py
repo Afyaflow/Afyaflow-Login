@@ -15,6 +15,9 @@ import logging
 from ..types import AuthPayloadType
 from ..services import create_auth_payload
 from users.models import User
+from ...otp_utils import generate_otp, set_user_otp
+from ...communication_client import send_templated_email, send_sms
+from ...authentication import create_token
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +58,72 @@ class BaseSocialAuthMutation(graphene.Mutation):
             logger.error(f"Error getting social app: {str(e)}")
             raise Exception(f"Error getting social app configuration: {str(e)}")
 
+    @classmethod
+    def _handle_login_or_mfa(cls, info, user):
+        """
+        Shared logic to handle post-authentication flow.
+        Checks if MFA is enabled for the user. If so, initiates the MFA challenge.
+        Otherwise, completes the login and returns JWT tokens.
+        """
+        enabled_methods = []
+        if user.mfa_totp_setup_complete:
+            enabled_methods.append("TOTP")
+        if user.mfa_email_enabled:
+            enabled_methods.append("EMAIL")
+        # Ensure phone is verified before listing SMS as an option
+        if user.mfa_sms_enabled and user.phone_number_verified:
+            enabled_methods.append("SMS")
+
+        if not enabled_methods:
+            # No MFA, log in directly
+            login(info.context, user, backend='allauth.account.auth_backends.AuthenticationBackend')
+            auth_data = create_auth_payload(user)
+            return cls(auth_payload=AuthPayloadType(**auth_data))
+
+        # MFA is enabled, start the challenge
+        logger.info(f"MFA required for user {user.email} during social login.")
+        
+        otp = None
+        # Send OTPs if Email or SMS MFA are enabled.
+        if "EMAIL" in enabled_methods or "SMS" in enabled_methods:
+            otp = generate_otp()
+            set_user_otp(user, otp, purpose='mfa_login') # Use a specific purpose
+
+            if "EMAIL" in enabled_methods:
+                try:
+                    send_templated_email(
+                        recipient=user.email,
+                        template_id='mfa_otp',
+                        context={"first_name": user.first_name or "user", "otp_code": otp}
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send MFA email to {user.email}: {e}")
+
+            if "SMS" in enabled_methods:
+                try:
+                    message = f"Your AfyaFlow verification code is: {otp}"
+                    send_sms(recipient=user.phone_number, message=message)
+                except Exception as e:
+                    logger.error(f"Failed to send MFA SMS to {user.phone_number}: {e}")
+        
+        # Create a short-lived MFA token.
+        mfa_token, _ = create_token(user.id, token_type='mfa')
+
+        # Return the challenge payload to the client (without access/refresh tokens).
+        challenge_payload = AuthPayloadType(
+            user=user,
+            mfa_required=True,
+            mfa_token=mfa_token,
+            enabled_mfa_methods=enabled_methods,
+        )
+        return cls(auth_payload=challenge_payload, errors=None)
+
 class GoogleLoginMutation(BaseSocialAuthMutation):
     """Handles Google OAuth2 authentication."""
     
     @classmethod
     def mutate(cls, root, info, access_token, id_token=None):
         try:
-            adapter = GoogleOAuth2Adapter(info.context)
             app = cls.get_social_app('google', info.context)
             
             # Fetch user info from Google
@@ -81,6 +143,17 @@ class GoogleLoginMutation(BaseSocialAuthMutation):
                 try:
                     # Try to find existing user
                     user = User.objects.get(email=email)
+                    # If user exists, ensure their email is marked as verified.
+                    if not user.email_verified:
+                        user.email_verified = True
+                        user.save(update_fields=['email_verified'])
+                    
+                    # Also ensure the allauth EmailAddress model is synced.
+                    email_address, created = EmailAddress.objects.get_or_create(user=user, email=user.email)
+                    if not email_address.verified:
+                        email_address.verified = True
+                        email_address.primary = True
+                        email_address.save()
                 except User.DoesNotExist:
                     # Create new user
                     user = User.objects.create_user(
@@ -93,7 +166,7 @@ class GoogleLoginMutation(BaseSocialAuthMutation):
                     user.set_unusable_password()
                     user.save()
 
-                    # Create verified email
+                    # Create verified email for allauth
                     EmailAddress.objects.create(
                         user=user,
                         email=email,
@@ -131,12 +204,8 @@ class GoogleLoginMutation(BaseSocialAuthMutation):
                     social_token.token_secret = id_token if id_token else ''
                     social_token.save()
 
-                # Log the user in
-                login(info.context, user, backend='allauth.account.auth_backends.AuthenticationBackend')
-                
-                # Create JWT tokens
-                auth_data = create_auth_payload(user)
-                return cls(auth_payload=AuthPayloadType(**auth_data))
+                # Hand off to the MFA check or final login flow
+                return cls._handle_login_or_mfa(info, user)
 
         except Exception as e:
             logger.error(f"Google authentication error: {str(e)}")
@@ -148,7 +217,6 @@ class MicrosoftLoginMutation(BaseSocialAuthMutation):
     @classmethod
     def mutate(cls, root, info, access_token, id_token=None):
         try:
-            adapter = MicrosoftGraphOAuth2Adapter(info.context)
             app = cls.get_social_app('microsoft', info.context)
             
             # Fetch user info from Microsoft Graph API
@@ -168,6 +236,17 @@ class MicrosoftLoginMutation(BaseSocialAuthMutation):
                 try:
                     # Try to find existing user
                     user = User.objects.get(email=email)
+                    # If user exists, ensure their email is marked as verified.
+                    if not user.email_verified:
+                        user.email_verified = True
+                        user.save(update_fields=['email_verified'])
+                    
+                    # Also ensure the allauth EmailAddress model is synced.
+                    email_address, created = EmailAddress.objects.get_or_create(user=user, email=user.email)
+                    if not email_address.verified:
+                        email_address.verified = True
+                        email_address.primary = True
+                        email_address.save()
                 except User.DoesNotExist:
                     # Create new user
                     user = User.objects.create_user(
@@ -180,7 +259,7 @@ class MicrosoftLoginMutation(BaseSocialAuthMutation):
                     user.set_unusable_password()
                     user.save()
 
-                    # Create verified email
+                    # Create verified email for allauth
                     EmailAddress.objects.create(
                         user=user,
                         email=email,
@@ -218,12 +297,8 @@ class MicrosoftLoginMutation(BaseSocialAuthMutation):
                     social_token.token_secret = id_token if id_token else ''
                     social_token.save()
 
-                # Log the user in
-                login(info.context, user, backend='allauth.account.auth_backends.AuthenticationBackend')
-                
-                # Create JWT tokens
-                auth_data = create_auth_payload(user)
-                return cls(auth_payload=AuthPayloadType(**auth_data))
+                # Hand off to the MFA check or final login flow
+                return cls._handle_login_or_mfa(info, user)
 
         except Exception as e:
             logger.error(f"Microsoft authentication error: {str(e)}")
