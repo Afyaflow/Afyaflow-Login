@@ -1,120 +1,162 @@
 # AfyaFlow Auth Service
 
-AfyaFlow Auth Service is a robust authentication and user management system built with Django. It provides a GraphQL API for user registration, login (including social login with Google), multi-factor authentication (MFA), and user profile management. 
+## Overview
 
-## Features
+The AfyaFlow Auth Service is a centralized, standalone Django application responsible for all user authentication, authorization, and management within the AfyaFlow ecosystem. It exposes a federated GraphQL API for seamless integration with other services, including the frontend application and the Organizations service.
 
-*   **User Authentication:** Secure registration and login with email and password.
-*   **JWT Support:** Uses JSON Web Tokens (JWT) for stateless authentication (access and refresh tokens).
-*   **GraphQL API:** Modern and flexible API for all authentication and user management operations.
-*   **Google OAuth 2.0:** Allows users to sign up and log in using their Google accounts.
-*   **Multi-Factor Authentication (MFA):** Supports Time-based One-Time Passwords (TOTP) for enhanced security.
-*   **Custom User Model:** Extends Django's user model with additional fields like MFA settings and account suspension status.
-*   **Password Management:** Secure password hashing, change password functionality, and password validation.
-*   **Profile Management:** Users can update their profile information (first name, last name).
-*   **External Organization Service Integration:** Can fetch user context from an external organization service upon login.
-*   **Dockerized:** Fully containerized with Docker and Docker Compose for easy testing setup and deployment.
-*   **Static File Serving:** Uses WhiteNoise for efficient static file serving in production.
-*   **CORS Configuration:** Handles Cross-Origin Resource Sharing.
+---
 
-## Prerequisites
+## Core Features
 
-*   [Docker](https://www.docker.com/get-started)
-*   [Docker Compose](https://docs.docker.com/compose/install/)
+-   **User Accounts:** Standard email/password registration and login.
+-   **Secure Password Management:** Robust, OTP-based password reset flow and secure password change functionality.
+-   **Multi-Factor Authentication (MFA):** Supports a consistent `initiate` -> `verify` -> `disable` flow for multiple MFA methods:
+    -   TOTP (Authenticator Apps like Google Authenticator)
+    -   Email OTP
+    -   SMS OTP
+-   **Contact Verification:** Flows for verifying user email addresses and phone numbers.
+-   **Social Login:** Supports login and registration via Google.
+-   **Federated Authorization:** Issues Organization Context Tokens (OCTs) for role-based access control in other services.
 
-## Setup and Installation
+---
 
-1.  **Clone the repository (if applicable):**
-    ```bash
-    # git clone <repository-url>
-    # cd <repository-name>
-    ```
+## Local Development Setup
 
-2.  **Create an environment file:**
-    Copy the example environment variables or create a new `.env` file in the project root. See the "Environment Variables" section below for required variables.
-    ```bash
-    # create .env manually
-    ```
+### Prerequisites
 
-3.  **Update Environment Variables in `.env`:**
-    You **must** set the following variables. Refer to `docker-compose.yml` and `afyaflow_auth/settings.py` for a comprehensive list and their usage.
-    *   `DJANGO_SECRET_KEY`: A strong, unique secret key for Django.
-    *   `JWT_SECRET_KEY`: A strong, unique secret key for JWT signing.
-    *   `GOOGLE_OAUTH_CLIENT_ID`: Your Google OAuth 2.0 Client ID.
-    *   `GOOGLE_OAUTH_CLIENT_SECRET`: Your Google OAuth 2.0 Client Secret.
-    *   Other variables like database credentials (defaults are provided in `docker-compose.yml` but can be overridden).
+-   Python 3.11+
+-   A Python virtual environment tool (e.g., `venv`)
+-   A running PostgreSQL instance
 
-4.  **Build and run the application using Docker Compose:**
-    ```bash
-    docker-compose up --build -d
-    ```
-    The `-d` flag runs the containers in detached mode.
+### 1. Installation
 
-The application should now be running.
-*   GraphQL API: `http://localhost:8000/graphql` (with GraphiQL interface)
-*   Django Admin: `http://localhost:8000/admin/`
-*   Allauth endpoints: `http://localhost:8000/accounts/` (e.g., `http://localhost:8000/accounts/login/`, `http://localhost:8000/accounts/google/login/`)
+```bash
+# Clone the repository
+git clone <repository_url>
+cd auth-service
 
-5.  **Create a superuser for Django admin:**
-    ```bash
-    # Create a superuser interactively
-    docker-compose exec auth_service python manage.py createsuperuser
-    ```
-    You will be prompted to enter:
-    - Email address
-    - First name (optional)
-    - Last name (optional) 
-    - Password
-    - Password confirmation
+# Create and activate a virtual environment
+python -m venv venv
+# On Windows
+# .\\venv\\Scripts\\activate
+# On macOS/Linux
+source venv/bin/activate
 
-    Make sure to use a strong password as this account will have full administrative access.
+# Install dependencies
+pip install -r requirements.txt
+```
 
+### 2. Configuration
 
-## Environment Variables
+This project uses environment variables for configuration. Create a `.env` file in the project root. 
 
-The following are some of the key environment variables used by the application. These are typically set in the `.env` file at the project root, which is then used by `docker-compose.yml`.
+Key variables to configure:
+-   `SECRET_KEY`: Your Django secret key.
+-   `DATABASE_URL`: The connection string for your PostgreSQL database (e.g., `postgres://user:password@localhost:5432/afyaflow_auth_db`).
+-   `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, etc.: Credentials for your SMTP service for sending emails.
+-   `GOOGLE_OAUTH2_CLIENT_ID`: The client ID for Google social login.
 
-*   `DEBUG`: Set to `True` for development, `False` for production. (Default: `False`)
-*   `DJANGO_SECRET_KEY`: **Required**. Django's secret key.
-*   `JWT_SECRET_KEY`: **Required**. Secret key for JWT signing. Defaults to `DJANGO_SECRET_KEY` if not set.
-*   `DB_NAME`: PostgreSQL database name. (Default: `afyaflow_auth`)
-*   `DB_USER`: PostgreSQL database user. (Default: `afyaflow`)
-*   `DB_PASSWORD`: PostgreSQL database password. (Default: `afyaflow_password`)
-*   `DB_HOST`: Database host. (Default: `db` - the service name in `docker-compose.yml`)
-*   `DB_PORT`: Database port. (Default: `5432`)
-*   `ALLOWED_HOSTS`: Comma-separated list of allowed hostnames. (e.g., `localhost,127.0.0.1,yourdomain.com`)
-*   `CORS_ALLOWED_ORIGINS`: Comma-separated list of origins allowed for CORS. (e.g., `http://localhost:3000,https://yourfrontend.com`)
-*   `ORGANIZATION_SERVICE_URL`: URL of the external organization service.
-*   `GOOGLE_OAUTH_CLIENT_ID`: **Required**. Your Google OAuth 2.0 Client ID.
-*   `GOOGLE_OAUTH_CLIENT_SECRET`: **Required**. Your Google OAuth 2.0 Client Secret.
-*   `JWT_ACCESS_TOKEN_LIFETIME`: Lifetime of access tokens in minutes. (Default: 30)
-*   `JWT_REFRESH_TOKEN_LIFETIME`: Lifetime of refresh tokens in minutes. (Default: 1440, i.e., 24 hours)
+### 3. Database Setup
 
-Refer to `docker-compose.yml` and `afyaflow_auth/settings.py` for defaults and more details.
+Ensure your PostgreSQL server is running and you have created a database for the service.
 
-## API Overview
+```bash
+# Apply the database schema
+python manage.py migrate
+```
 
-The primary API is a GraphQL API accessible at `/graphql`. It includes a GraphiQL interface in debug mode for easy exploration and testing of queries and mutations.
+### 4. Running the Server
 
-Key GraphQL operations include:
-*   User registration and login
-*   Refreshing JWT tokens
-*   User logout
-*   Profile updates
-*   Password changes
-*   MFA setup, verification, and disabling
-*   Login/registration with Google
+```bash
+# Start the local development server
+python manage.py runserver
+```
+The GraphQL API will be available at `http://127.0.0.1:8000/graphql`.
 
-For detailed API documentation, refer to `apiDocumentation.md`.
+---
 
-## Running the Application
+## GraphQL API Reference
 
-Once the Docker containers are running (using `docker-compose up`), the application will be accessible:
+### User Authentication & Registration
 
-*   **GraphQL API & GraphiQL IDE:** `http://localhost:8000/graphql`
-*   **Django Admin Interface:** `http://localhost:8000/admin/`
-    *   You'll need to create a superuser first:
-        ```bash
-        docker-compose exec auth_service python manage.py createsuperuser
-        ```
-*   **Allauth URLs:** `http://localhost:8000/accounts/` (e.g., for Google login initiation, password resets if configured through Allauth templates).
+#### `register`
+Creates a new user account. On success, it sends a verification OTP to the user's email.
+-   **Arguments:** `email`, `password`, `passwordConfirm`, `firstName`, `lastName`
+-   **Returns:** `AuthPayloadType` with tokens and `user.emailVerified: false`.
+
+#### `login`
+Logs a user in.
+-   **Arguments:** `email`, `password`
+-   **Returns:** `AuthPayloadType`.
+    -   **If no MFA:** Returns user object and access/refresh tokens.
+    -   **If MFA is enabled:** Returns user object, `mfaRequired: true`, `mfaToken`, and `enabledMfaMethods`. Tokens are `null`.
+
+#### `verifyMfa`
+Completes the second step of an MFA login.
+-   **Arguments:** `mfaToken` (from `login` response), `otpCode`
+-   **Returns:** `AuthPayloadType` with tokens.
+
+#### `loginWithGoogle`
+Logs in or registers a user with their Google account.
+-   **Arguments:** `idToken` (from Google Sign-In SDK)
+-   **Returns:** `AuthPayloadType` (may require MFA verification).
+
+#### `refreshToken`
+Issues a new access token.
+-   **Arguments:** `refreshToken`
+-   **Returns:** A new `accessToken`.
+
+#### `logout`
+Invalidates the user's refresh token.
+-   **Arguments:** `refreshToken`
+
+### Password Management
+
+#### `changePassword`
+Allows a logged-in user to change their password.
+-   **Arguments:** `oldPassword`, `newPassword`, `newPasswordConfirm`
+
+#### Forgot Password Flow (2 Steps)
+
+1.  **`initiatePasswordReset`**
+    -   Sends a 6-digit OTP to the user's specified contact channel.
+    -   **Arguments:** `emailOrPhone` (can be an email address or a phone number).
+2.  **`resetPasswordWithOtp`**
+    -   Verifies the OTP and sets the new password.
+    -   **Arguments:** `emailOrPhone` (from Step 1), `otpCode`, `newPassword`, `newPasswordConfirm`
+
+### Email & Phone Verification
+
+#### `resendVerificationEmail`
+Sends a new verification OTP to the logged-in user's email.
+
+#### `verifyEmail`
+Verifies the OTP to mark the user's email as verified.
+-   **Arguments:** `otpCode`
+
+#### `addPhoneNumber`
+Adds a phone number to a user's account and sends a verification OTP via SMS.
+-   **Arguments:** `phoneNumber` (must be in E.164 format, e.g., `+254790787787`).
+
+#### `verifyPhoneNumber`
+Verifies the OTP to mark the user's phone number as verified.
+-   **Arguments:** `otpCode`
+
+### Multi-Factor Authentication (MFA) Management
+
+All MFA methods follow a consistent `initiate` -> `verify` -> `disable` flow.
+
+#### TOTP (Authenticator App)
+1.  **`initiateTotpSetup`**: Returns a provisioning URI and a Base64 QR code image for the user to scan.
+2.  **`verifyTotpSetup`**: Confirms the setup by validating an OTP from the app. (Arg: `otpCode`)
+3.  **`disableTotp`**: Disables TOTP by validating a final OTP from the app. (Arg: `otpCode`)
+
+#### Email MFA
+1.  **`initiateEmailMfaSetup`**: Sends an OTP to the user's verified email.
+2.  **`verifyEmailMfaSetup`**: Validates the OTP to enable Email MFA. (Arg: `otpCode`)
+3.  **`disableEmailMfa`**: Disables Email MFA after validating the user's current password. (Arg: `password`)
+
+#### SMS MFA
+1.  **`initiateSmsMfaSetup`**: Sends an OTP to the user's verified phone number.
+2.  **`verifySmsMfaSetup`**: Validates the OTP to enable SMS MFA. (Arg: `otpCode`)
+3.  **`disableSmsMfa`**: Disables SMS MFA after validating the user's current password. (Arg: `password`)
