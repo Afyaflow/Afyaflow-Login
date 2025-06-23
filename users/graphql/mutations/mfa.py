@@ -210,7 +210,7 @@ class VerifyEmailMfaSetupMutation(graphene.Mutation):
         if not user.is_authenticated:
             raise GraphQLError("You must be logged in.")
 
-        if not verify_otp(otp_code, user.mfa_otp, purpose='mfa_setup'):
+        if not verify_otp(otp_code, user, purpose='mfa_setup'):
             raise GraphQLError("Invalid or expired OTP code.")
         
         user.mfa_email_enabled = True
@@ -288,7 +288,7 @@ class VerifySmsMfaSetupMutation(graphene.Mutation):
         if not user.is_authenticated:
             raise GraphQLError("You must be logged in.")
 
-        if not verify_otp(otp_code, user.mfa_otp, purpose='mfa_setup'):
+        if not verify_otp(otp_code, user, purpose='mfa_setup'):
             raise GraphQLError("Invalid or expired OTP code.")
         
         user.mfa_sms_enabled = True
@@ -349,10 +349,8 @@ class AddPhoneNumberMutation(graphene.Mutation):
         user.phone_number_verified = False  # Mark as unverified until OTP is confirmed
         
         otp = generate_otp()
-        # Save the phone number field along with the OTP fields.
-        user.mfa_otp = hash_otp(otp)
-        user.mfa_otp_expires_at = timezone.now() + timedelta(minutes=10)
-        user.save(update_fields=['phone_number', 'phone_number_verified', 'mfa_otp', 'mfa_otp_expires_at'])
+        set_user_otp(user, otp, purpose='phone_verification')
+        user.save(update_fields=['phone_number', 'phone_number_verified'])
 
         # Send the OTP via SMS
         message = f"Your AfyaFlow verification code is: {otp}"
@@ -385,7 +383,7 @@ class VerifyPhoneNumberMutation(graphene.Mutation):
         if timezone.now() > user.mfa_otp_expires_at:
             return cls(ok=False, errors=["The OTP code has expired."])
 
-        if not verify_otp(otp_code, user.mfa_otp):
+        if not verify_otp(otp_code, user, purpose='phone_verification'):
             return cls(ok=False, errors=["Invalid OTP code."])
 
         # Mark phone as verified and clear the temporary OTP

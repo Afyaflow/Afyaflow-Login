@@ -50,7 +50,7 @@ class RegisterMutation(graphene.Mutation):
         # Send a verification OTP to the user's email
         try:
             otp = generate_otp()
-            set_user_otp(user, otp) # Saves the hashed OTP and expiry to the user model
+            set_user_otp(user, otp, purpose='email_verification') # Saves the hashed OTP and expiry to the user model
 
             context = {
                 "first_name": user.first_name or "there",

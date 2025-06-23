@@ -30,7 +30,7 @@ class VerifyEmailMutation(graphene.Mutation):
         if user.email_verified:
             return cls(auth_payload=None, errors=["Email is already verified."])
 
-        if not verify_otp(otp_code, user.mfa_otp):
+        if not verify_otp(otp_code, user, purpose='email_verification'):
              return cls(auth_payload=None, errors=["Invalid or expired OTP."])
         
         user.email_verified = True
@@ -69,7 +69,7 @@ class ResendVerificationEmailMutation(graphene.Mutation):
 
         # Generate and send a new OTP
         otp = generate_otp()
-        set_user_otp(user, otp)
+        set_user_otp(user, otp, purpose='email_verification')
 
         try:
             context = {"first_name": user.first_name or "user", "otp_code": otp}
