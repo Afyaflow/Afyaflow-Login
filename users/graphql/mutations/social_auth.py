@@ -16,6 +16,19 @@ from ..services import create_auth_payload
 
 logger = logging.getLogger(__name__)
 
+class OAuth2Response:
+    """Mock response object for OAuth2 providers"""
+    def __init__(self, response):
+        self.status_code = response.status_code
+        self._json = response.json()
+        self.text = response.text
+
+    def json(self):
+        return self._json
+
+    def get(self, key, default=None):
+        return self._json.get(key, default)
+
 class BaseSocialAuthMutation(graphene.Mutation):
     """Base class for social authentication mutations."""
     class Arguments:
@@ -64,11 +77,7 @@ class GoogleLoginMutation(BaseSocialAuthMutation):
                 raise Exception("Failed to get user info from Google")
             
             # Create a response object that the adapter expects
-            oauth2_response = type('OAuth2Response', (), {
-                'status_code': response.status_code,
-                'text': response.text,
-                'json': lambda: response.json()
-            })()
+            oauth2_response = OAuth2Response(response)
 
             # Get user info from Google
             provider = adapter.get_provider()
@@ -124,11 +133,7 @@ class MicrosoftLoginMutation(BaseSocialAuthMutation):
                 raise Exception("Failed to get user info from Microsoft")
             
             # Create a response object that the adapter expects
-            oauth2_response = type('OAuth2Response', (), {
-                'status_code': response.status_code,
-                'text': response.text,
-                'json': lambda: response.json()
-            })()
+            oauth2_response = OAuth2Response(response)
 
             # Get user info from Microsoft
             provider = adapter.get_provider()
