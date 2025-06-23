@@ -179,7 +179,7 @@ class VerifyMfaMutation(graphene.Mutation):
         # If not valid yet, check Email/SMS OTP
         if not is_valid and (user.mfa_email_enabled or user.mfa_sms_enabled):
             if user.mfa_otp and user.mfa_otp_expires_at and timezone.now() < user.mfa_otp_expires_at:
-                if verify_otp(otp_code, user.mfa_otp):
+                if verify_otp(otp_code, user):
                     is_valid = True
                     # Invalidate the one-time code immediately after use
                     user.mfa_otp = None

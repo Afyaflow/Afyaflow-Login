@@ -5,12 +5,16 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from datetime import timedelta
+from django.db.models import Q
 import secrets
+import re # Import the regular expressions module
 
 from ..types import UserType
 from ...models import RefreshToken, User
 from ...serializers import UserProfileSerializer
-from ...communication_client import send_templated_email
+from ...communication_client import send_templated_email, send_sms
+from ...otp_utils import generate_otp, set_user_otp, verify_otp
+from graphql import GraphQLError
 
 logger = logging.getLogger(__name__)
 
@@ -90,58 +94,66 @@ class ChangePasswordMutation(graphene.Mutation):
 
 class InitiatePasswordResetMutation(graphene.Mutation):
     """
-    Initiates the password reset process for a user by generating a token
-    and sending it to their email.
+    Initiates the password reset process by sending an OTP to the user's
+    email and/or verified phone number.
     """
     class Arguments:
-        email = graphene.String(required=True)
+        email_or_phone = graphene.String(required=True)
 
     ok = graphene.Boolean()
     message = graphene.String()
-    errors = graphene.List(graphene.String)
 
     @classmethod
-    def mutate(cls, root, info, email):
-        try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
-            # Don't reveal that the user does not exist.
-            # Return a success-like message to prevent user enumeration.
-            logger.warning(f"Password reset initiated for non-existent email: {email}")
-            return InitiatePasswordResetMutation(ok=True, message="If an account with this email exists, a password reset link has been sent.")
-
-        # Generate a secure, URL-safe token
-        token = secrets.token_urlsafe(32)
+    def mutate(cls, root, info, email_or_phone):
+        # Determine if the input is an email or a phone number
+        is_email = re.match(r"[^@]+@[^@]+\.[^@]+", email_or_phone)
         
-        # Set token and expiry on the user model (e.g., valid for 10 minutes)
-        user.password_reset_token = token
-        user.password_reset_token_expires_at = timezone.now() + timedelta(minutes=10)
-        user.save()
-
-        # Send the password reset email
         try:
-            context = {"first_name": user.first_name or "user", "reset_token": token}
-            email_sent = send_templated_email(
-                recipient=user.email,
-                template_id='password_reset',
-                context=context
-            )
-            if not email_sent:
-                logger.error(f"Failed to send password reset email to {user.email}.")
-                return InitiatePasswordResetMutation(ok=False, errors=["Failed to send email. Please try again later."])
-        except Exception as e:
-            logger.error(f"An unexpected error occurred trying to send password reset email for {user.email}: {e}")
-            return InitiatePasswordResetMutation(ok=False, errors=["An unexpected error occurred. Please try again later."])
+            if is_email:
+                user = User.objects.get(email__iexact=email_or_phone)
+            else:
+                user = User.objects.get(phone_number=email_or_phone)
+        except User.DoesNotExist:
+            logger.warning(f"Password reset initiated for non-existent user: {email_or_phone}")
+            return cls(ok=True, message="If an account with this email or phone number exists, a password reset code has been sent.")
 
-        logger.info(f"Password reset token sent to {email}.")
-        return InitiatePasswordResetMutation(ok=True, message="If an account with this email exists, a password reset link has been sent.")
+        otp = generate_otp()
+        set_user_otp(user, otp, purpose='password_reset')
 
-class ConfirmPasswordResetMutation(graphene.Mutation):
+        # Send the OTP to the selected channel only
+        if is_email:
+            try:
+                send_templated_email(
+                    recipient=user.email,
+                    template_id='password_reset_otp',
+                    context={"first_name": user.first_name or "user", "otp_code": otp}
+                )
+                logger.info(f"Password reset OTP sent to email for user {user.email}.")
+            except Exception as e:
+                logger.error(f"Failed to send password reset email for {user.email}: {e}")
+                raise GraphQLError("Failed to send the password reset code. Please try again later.")
+        else: # It's a phone number
+            if user.phone_number_verified:
+                try:
+                    message = f"Your AfyaFlow password reset code is: {otp}"
+                    send_sms(recipient=user.phone_number, message=message)
+                    logger.info(f"Password reset OTP sent to phone for user {user.email}.")
+                except Exception as e:
+                    logger.error(f"Failed to send password reset SMS for {user.email}: {e}")
+                    raise GraphQLError("Failed to send the password reset code. Please try again later.")
+            else:
+                # Don't send if the phone number isn't verified, but don't reveal that either.
+                logger.warning(f"Password reset attempted for user {user.email} with unverified phone number.")
+        
+        return cls(ok=True, message="If an account with this email or phone number exists, a password reset code has been sent.")
+
+class ResetPasswordWithOtpMutation(graphene.Mutation):
     """
-    Completes the password reset process using a valid token.
+    Completes the password reset process using a valid OTP.
     """
     class Arguments:
-        token = graphene.String(required=True)
+        email_or_phone = graphene.String(required=True)
+        otp_code = graphene.String(required=True)
         new_password = graphene.String(required=True)
         new_password_confirm = graphene.String(required=True)
 
@@ -149,31 +161,48 @@ class ConfirmPasswordResetMutation(graphene.Mutation):
     errors = graphene.List(graphene.String)
 
     @classmethod
-    def mutate(cls, root, info, token, new_password, new_password_confirm):
+    @transaction.atomic
+    def mutate(cls, root, info, email_or_phone, otp_code, new_password, new_password_confirm):
         if new_password != new_password_confirm:
-            return ConfirmPasswordResetMutation(ok=False, errors=["Passwords do not match."])
+            return cls(ok=False, errors=["Passwords do not match."])
 
         try:
             user = User.objects.get(
-                password_reset_token=token,
-                password_reset_token_expires_at__gt=timezone.now()
+                Q(email__iexact=email_or_phone) | Q(phone_number=email_or_phone)
             )
         except User.DoesNotExist:
-            return ConfirmPasswordResetMutation(ok=False, errors=["Invalid or expired token."])
+            return cls(ok=False, errors=["Invalid OTP or user not found."])
+
+        if not verify_otp(otp_code, user, purpose='password_reset'):
+            return cls(ok=False, errors=["Invalid or expired OTP code."])
 
         try:
-            # Use Django's built-in validators to check password strength
             validate_password(new_password, user)
         except ValidationError as e:
-            return ConfirmPasswordResetMutation(ok=False, errors=list(e.messages))
+            return cls(ok=False, errors=list(e.messages))
 
-        # Set the new password
         user.set_password(new_password)
         
-        # Invalidate the reset token
-        user.password_reset_token = None
-        user.password_reset_token_expires_at = None
+        # Invalidate the reset OTP
+        user.mfa_otp = None
+        user.mfa_otp_expires_at = None
+        user.mfa_otp_purpose = None
         user.save()
 
+        # Also revoke all refresh tokens for security
+        RefreshToken.objects.filter(user=user).update(is_revoked=True)
+
+        # Send a confirmation email that the password has changed
+        try:
+            send_templated_email(
+                recipient=user.email,
+                template_id='password_changed_notification', # New template
+                context={"first_name": user.first_name or "user"}
+            )
+            logger.info(f"Sent password change notification to user {user.email}.")
+        except Exception as e:
+            logger.error(f"Failed to send password change notification to {user.email}: {e}")
+            # Do not fail the whole mutation if this email fails
+        
         logger.info(f"Password reset successfully for user {user.email}.")
-        return ConfirmPasswordResetMutation(ok=True, errors=None)
+        return cls(ok=True)

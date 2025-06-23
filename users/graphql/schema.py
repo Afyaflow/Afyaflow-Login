@@ -15,7 +15,7 @@ from .mutations.profile import (
     UpdateProfileMutation,
     ChangePasswordMutation,
     InitiatePasswordResetMutation,
-    ConfirmPasswordResetMutation,
+    ResetPasswordWithOtpMutation,
 )
 from .mutations.mfa import (
     InitiateTotpSetupMutation,
@@ -52,7 +52,7 @@ class UserMutation(graphene.ObjectType):
     update_profile = UpdateProfileMutation.Field()
     change_password = ChangePasswordMutation.Field()
     initiate_password_reset = InitiatePasswordResetMutation.Field()
-    confirm_password_reset = ConfirmPasswordResetMutation.Field()
+    reset_password_with_otp = ResetPasswordWithOtpMutation.Field()
     
     # Email Verification
     verify_email = VerifyEmailMutation.Field()
