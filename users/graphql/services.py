@@ -4,6 +4,8 @@ from django.conf import settings
 from django.utils import timezone
 from ..models import User, RefreshToken
 from ..authentication import create_token, create_oct_token
+from .organizations import get_user_organization_memberships
+from datetime import timedelta
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -127,37 +129,34 @@ def _claim_pending_invitations(user: User):
         logger.error(f"Failed to claim pending invitations for user {user.email}. Error: {response_data.get('errors')}")
 
 
-def create_auth_payload(user):
+def create_auth_payload(user, mfa_required=False, mfa_token=None, enabled_mfa_methods=None):
     """
-    Creates JWTs, saves the refresh token, and claims pending org invitations.
+    Generates the authentication payload for a user.
+    Includes access and refresh tokens unless an MFA step is explicitly required.
     """
-    access_token_str, _ = create_token(user.id, token_type='access')
-    refresh_token_str, refresh_expires_at = create_token(user.id, token_type='refresh')
-
-    RefreshToken.objects.create(
-        user=user,
-        token=refresh_token_str,
-        expires_at=refresh_expires_at
-    )
+    from ..graphql.types import OrganizationMembershipType # Lazy import to avoid circular dependency
     
-    # Update last_login
-    user.last_login = timezone.now()
-    user.save(update_fields=['last_login'])
-
-    logger.info(f"Successfully created tokens for user {user.email}")
-    
-    # Claim any pending invitations for this user's email
-    _claim_pending_invitations(user)
-
-    # Now, fetch the user's organization memberships (including newly claimed ones)
+    # 1. Get organization memberships
     organization_memberships_data = get_user_organization_memberships(user.id)
-
+    
+    # 2. Base payload
     payload = {
         "user": user,
-        "access_token": access_token_str,
-        "refresh_token": refresh_token_str,
-        "organization_memberships": organization_memberships_data,
+        "organization_memberships": [OrganizationMembershipType(**mem) for mem in organization_memberships_data],
+        "mfa_required": mfa_required,
+        "mfa_token": mfa_token,
+        "enabled_mfa_methods": enabled_mfa_methods,
+        "access_token": None,
+        "refresh_token": None,
     }
+
+    # 3. If MFA is not required, generate and add tokens
+    if not mfa_required:
+        access_token_str, _ = create_token(user.id, token_type='access')
+        refresh_token_str, refresh_token_obj = create_token(user.id, token_type='refresh')
+
+        payload["access_token"] = access_token_str
+        payload["refresh_token"] = refresh_token_str
 
     return payload
 

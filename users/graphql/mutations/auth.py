@@ -47,20 +47,27 @@ class RegisterMutation(graphene.Mutation):
         
         user = serializer.save()
         
-        # Send welcome email
+        # Send a verification OTP to the user's email
         try:
-            context = {"first_name": user.first_name or "there"}
+            otp = generate_otp()
+            set_user_otp(user, otp) # Saves the hashed OTP and expiry to the user model
+
+            context = {
+                "first_name": user.first_name or "there",
+                "otp_code": otp
+            }
             email_sent = send_templated_email(
                 recipient=user.email,
-                template_id='user_registration',
+                template_id='email_verification', # Assumes this template exists
                 context=context
             )
             if not email_sent:
-                logger.warning(f"Failed to send welcome email to {user.email}, but registration will proceed.")
+                # Log a warning but don't fail the registration. The user can request another OTP.
+                logger.warning(f"Failed to send verification email to {user.email}, but registration will proceed.")
         except Exception as e:
-            logger.error(f"An unexpected error occurred trying to send welcome email for {user.email}: {e}")
+            logger.error(f"An unexpected error occurred trying to send verification email for {user.email}: {e}")
 
-        logger.info(f"User {email} registered successfully.")
+        logger.info(f"User {email} registered successfully. A verification OTP has been sent.")
         
         auth_data = create_auth_payload(user)
         auth_payload_instance = AuthPayloadType(**auth_data)
@@ -69,14 +76,14 @@ class RegisterMutation(graphene.Mutation):
 
 class LoginMutation(graphene.Mutation):
     """
-    Logs in a user. This is the first step of a potential two-step MFA flow.
-    Returns either a full authentication payload or an MFA challenge.
+    Logs in a user. Returns an authentication payload which may indicate
+    that a second MFA step is required to complete the login.
     """
     class Arguments:
         email = graphene.String(required=True)
         password = graphene.String(required=True)
 
-    payload = graphene.Field(LoginPayload)
+    auth_payload = graphene.Field(AuthPayloadType)
     errors = graphene.List(graphene.String)
 
     @classmethod
@@ -85,48 +92,55 @@ class LoginMutation(graphene.Mutation):
         user = authenticate(email=email, password=password)
         if not user:
             logger.warning(f"Login failed for email {email}: Invalid credentials.")
-            return LoginMutation(payload=None, errors=["Invalid credentials."])
+            return LoginMutation(auth_payload=None, errors=["Invalid credentials."])
         
         if user.is_suspended:
             reason = getattr(user, 'suspension_reason', 'No reason provided.')
             logger.warning(f"Login failed for email {email}: Account suspended. Reason: {reason}")
-            return LoginMutation(payload=None, errors=[f"Account is suspended. Reason: {reason}"])
+            return LoginMutation(auth_payload=None, errors=[f"Account is suspended. Reason: {reason}"])
 
-        # Check if any MFA method is active
-        is_mfa_active = user.mfa_totp_setup_complete or user.mfa_email_enabled or user.mfa_sms_enabled
+        # Check which MFA methods are active
+        enabled_methods = []
+        if user.mfa_totp_setup_complete: enabled_methods.append("TOTP")
+        if user.mfa_email_enabled: enabled_methods.append("EMAIL")
+        if user.mfa_sms_enabled and user.phone_number_verified: enabled_methods.append("SMS")
+
+        is_mfa_active = bool(enabled_methods)
 
         if not is_mfa_active:
-            # No MFA enabled, log the user in directly.
-            auth_data = create_auth_payload(user)
-            return LoginMutation(payload=AuthPayloadType(**auth_data))
+            # No MFA enabled, return the full auth payload with tokens.
+            auth_data = create_auth_payload(user, mfa_required=False)
+            return LoginMutation(auth_payload=AuthPayloadType(**auth_data))
 
         # MFA is active, so we start the two-step challenge.
         
         # 1. Send OTPs if Email or SMS MFA are enabled.
-        if user.mfa_email_enabled or user.mfa_sms_enabled:
+        if "EMAIL" in enabled_methods or "SMS" in enabled_methods:
             otp = generate_otp()
-            set_user_otp(user, otp)  # Hashes and saves OTP to the user model
-            
+            set_user_otp(user, otp)
+
             message_context = f"Your AfyaFlow verification code is: {otp}"
-            if user.mfa_email_enabled:
+            if "EMAIL" in enabled_methods:
                 send_templated_email(
                     recipient=user.email,
-                    template_id='mfa_otp',
+                    template_id='mfa_otp', # Assumes this template exists
                     context={"first_name": user.first_name or "user", "otp_code": otp}
                 )
-            if user.mfa_sms_enabled and user.phone_number_verified:
+            if "SMS" in enabled_methods:
                 send_sms(recipient=user.phone_number, message=message_context)
 
         # 2. Create a short-lived MFA token.
         mfa_token, _ = create_token(user.id, token_type='mfa')
 
-        # 3. Return the MFA challenge to the client.
-        challenge = MfaChallengeType(
+        # 3. Return the challenge payload to the client (without access/refresh tokens).
+        challenge_payload = AuthPayloadType(
+            user=user,
+            mfa_required=True,
             mfa_token=mfa_token,
-            message="MFA is required. Please submit an OTP to complete login."
+            enabled_mfa_methods=enabled_methods,
         )
         logger.info(f"MFA challenge issued for user {user.email}.")
-        return LoginMutation(payload=challenge)
+        return LoginMutation(auth_payload=challenge_payload)
 
 class VerifyMfaMutation(graphene.Mutation):
     """

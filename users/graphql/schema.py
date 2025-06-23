@@ -26,6 +26,10 @@ from .mutations.mfa import (
     VerifyPhoneNumberMutation,
     ToggleSmsMfaMutation,
 )
+from .mutations.verification import (
+    VerifyEmailMutation,
+    ResendVerificationEmailMutation,
+)
 
 # Then import queries
 from .queries import UserQuery
@@ -46,6 +50,11 @@ class UserMutation(graphene.ObjectType):
     initiate_password_reset = InitiatePasswordResetMutation.Field()
     confirm_password_reset = ConfirmPasswordResetMutation.Field()
     
+    # Email Verification
+    verify_email = VerifyEmailMutation.Field()
+    resend_verification_email = ResendVerificationEmailMutation.Field()
+
+    # MFA Management
     initiate_mfa_setup = InitiateMFASetupMutation.Field(description="Initiates the MFA setup process for the authenticated user.")
     verify_mfa_setup = VerifyMFASetupMutation.Field(description="Verifies the OTP code and enables MFA for the user.")
     disable_mfa = DisableMFAMutation.Field(description="Disables MFA for the authenticated user after verification.")

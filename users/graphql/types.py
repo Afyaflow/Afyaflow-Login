@@ -4,12 +4,16 @@ from ..models import User
 
 class UserType(DjangoObjectType):
     """GraphQL type for the User model, representing a healthcare professional or system user."""
+    totp_setup = graphene.Boolean(source='mfa_totp_setup_complete', description="True if TOTP is configured and verified.")
+    sms_mfa_enabled = graphene.Boolean(source='mfa_sms_enabled', description="True if SMS MFA is enabled.")
+    email_mfa_enabled = graphene.Boolean(source='mfa_email_enabled', description="True if Email MFA is enabled.")
+
     class Meta:
         model = User
         fields = (
             "id", "email", "first_name", "last_name", "is_active", "is_staff",
             "is_superuser", "is_suspended", "date_joined", "last_login",
-            "mfa_totp_setup_complete", "mfa_email_enabled", "mfa_sms_enabled",
+            "email_verified",
             "phone_number", "phone_number_verified"
         )
         description = "Represents a user within the Afyaflow system."
@@ -46,20 +50,31 @@ class OrganizationMembershipType(graphene.ObjectType):
     # Imight include the user's role in this organization.
 
 class AuthPayloadType(graphene.ObjectType):
-    """Payload returned after successful authentication (login or register)."""
+    """
+    Payload returned after a login or registration attempt.
+    If MFA is not required, tokens will be provided.
+    If MFA is required, the 'mfaRequired' flag will be true, and the client must complete the second step.
+    """
     user = graphene.Field(UserType, description="The authenticated user object.")
-    access_token = graphene.String(name="accessToken", description="JWT access token for authenticated requests.")
-    refresh_token = graphene.String(name="refreshToken", description="JWT refresh token to obtain new access tokens.")
+    access_token = graphene.String(name="accessToken", required=False, description="JWT access token. Null if MFA is required.")
+    refresh_token = graphene.String(name="refreshToken", required=False, description="JWT refresh token. Null if MFA is required.")
+    
+    # New fields for MFA Flow Control
+    mfa_required = graphene.Boolean(name="mfaRequired", description="True if an MFA step is required to complete login.")
+    mfa_token = graphene.String(name="mfaToken", required=False, description="A short-lived token to use in the verifyMfa mutation. Provided only when MFA is required.")
+    enabled_mfa_methods = graphene.List(graphene.String, name="enabledMfaMethods", required=False, description="A list of MFA methods enabled for the user (e.g., ['TOTP', 'SMS']).")
+
     organization_memberships = graphene.List(OrganizationMembershipType, name="organizationMemberships", required=False, description="A list of organizations the user is a member of.")
-    errors = graphene.List(graphene.String, description="List of error messages if any operation within the mutation fails.") # Added to Login, Register
+    errors = graphene.List(graphene.String, description="List of error messages if any operation within the mutation fails.")
 
 class MfaChallengeType(graphene.ObjectType):
-    """Indicates that a Multi-Factor Authentication challenge has been issued."""
+    """DEPRECATED: This will be removed in favor of the enhanced AuthPayloadType."""
     mfa_required = graphene.Boolean(default_value=True, description="Confirms that MFA is required.")
     mfa_token = graphene.String(description="A short-lived token to be used in the verifyMfa mutation.")
     message = graphene.String(description="A message to the user, e.g., indicating where OTPs were sent.")
 
 class LoginPayload(graphene.Union):
+    """DEPRECATED: This will be removed in favor of the enhanced AuthPayloadType."""
     class Meta:
         types = (AuthPayloadType, MfaChallengeType)
 

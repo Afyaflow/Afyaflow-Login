@@ -59,3 +59,5 @@ auth-test-ui/.env.production.local
 /graphql-gateway/ 
 /organizations/
 /email-service/
+Afyaflow Authentication Workflow.md
+authentication_enhancement_plan.md
