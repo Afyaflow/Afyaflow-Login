@@ -7,7 +7,7 @@ from ..types import AuthPayloadType
 from ...models import User
 from ...otp_utils import generate_otp, set_user_otp, verify_otp
 from ...communication_client import send_templated_email
-from ...authentication import create_auth_payload
+from ..services import create_auth_payload
 
 logger = logging.getLogger(__name__)
 

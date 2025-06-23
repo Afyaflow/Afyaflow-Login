@@ -61,3 +61,4 @@ auth-test-ui/.env.production.local
 /email-service/
 Afyaflow Authentication Workflow.md
 authentication_enhancement_plan.md
+Afyaflow Authentication frontend Workflow.md
