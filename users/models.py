@@ -50,6 +50,7 @@ class User(AbstractUser):
     # Fields for temporary OTPs (Email/SMS)
     mfa_otp = models.CharField(max_length=128, null=True, blank=True, help_text="Stores the hashed one-time password.")
     mfa_otp_expires_at = models.DateTimeField(null=True, blank=True, help_text="Expiry time for the one-time password.")
+    mfa_otp_purpose = models.CharField(max_length=50, null=True, blank=True, help_text="Purpose of the OTP (e.g., 'phone_verification', 'mfa_setup').")
 
     # Account status
     is_suspended = models.BooleanField(default=False)

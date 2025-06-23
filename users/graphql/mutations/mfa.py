@@ -5,7 +5,7 @@ from io import BytesIO
 import base64
 from graphql import GraphQLError
 from ...communication_client import send_templated_email, send_sms
-from ...otp_utils import generate_otp, verify_otp, hash_otp
+from ...otp_utils import generate_otp, verify_otp, hash_otp, set_user_otp
 from ...models import User
 import logging
 from django.db import transaction
@@ -16,8 +16,16 @@ from ..types import UserType
 
 logger = logging.getLogger(__name__)
 
-class InitiateMFASetupMutation(graphene.Mutation):
-    """Initiates the MFA setup process for the authenticated user."""
+# Helper function to check password
+def _check_user_password(user, password):
+    if not user.check_password(password):
+        logger.warning(f"Password verification failed for user {user.email}.")
+        raise GraphQLError("Invalid password.")
+
+# --- TOTP (Authenticator App) Mutations ---
+
+class InitiateTotpSetupMutation(graphene.Mutation):
+    """Initiates the TOTP MFA setup process."""
     class Arguments:
         pass
 
@@ -76,8 +84,8 @@ class InitiateMFASetupMutation(graphene.Mutation):
             qr_code_image=f"data:image/png;base64,{qr_code_base64}"
         )
 
-class VerifyMFASetupMutation(graphene.Mutation):
-    """Verifies the OTP code and enables MFA for the user."""
+class VerifyTotpSetupMutation(graphene.Mutation):
+    """Verifies the TOTP code and completes the setup."""
     class Arguments:
         otp_code = graphene.String(required=True)
 
@@ -90,13 +98,13 @@ class VerifyMFASetupMutation(graphene.Mutation):
     def mutate(cls, root, info, otp_code):
         user = info.context.user
         if user.is_anonymous:
-            return VerifyMFASetupMutation(ok=False, errors=["User is not authenticated."])
+            return VerifyTotpSetupMutation(ok=False, errors=["User is not authenticated."])
 
         if not user.mfa_totp_secret:
-            return VerifyMFASetupMutation(ok=False, errors=["MFA setup has not been initiated."])
+            return VerifyTotpSetupMutation(ok=False, errors=["MFA setup has not been initiated."])
         
         if user.mfa_totp_setup_complete:
-            return VerifyMFASetupMutation(ok=False, errors=["MFA is already verified."])
+            return VerifyTotpSetupMutation(ok=False, errors=["MFA is already verified."])
 
         totp = pyotp.TOTP(user.mfa_totp_secret)
         if totp.verify(otp_code):
@@ -104,13 +112,13 @@ class VerifyMFASetupMutation(graphene.Mutation):
             user.save(update_fields=['mfa_totp_setup_complete'])
 
             logger.info(f"TOTP MFA setup was successfully verified for user {user.email}")
-            return VerifyMFASetupMutation(ok=True)
+            return VerifyTotpSetupMutation(ok=True)
         else:
             logger.warning(f"MFA verification failed for user {user.email}: Invalid OTP code.")
-            return VerifyMFASetupMutation(ok=False, errors=["Invalid OTP code."])
+            return VerifyTotpSetupMutation(ok=False, errors=["Invalid OTP code."])
 
-class DisableMFAMutation(graphene.Mutation):
-    """Disables MFA for the authenticated user."""
+class DisableTotpMutation(graphene.Mutation):
+    """Disables TOTP MFA for the user, requiring a valid TOTP code."""
     class Arguments:
         otp_code = graphene.String(required=True)
 
@@ -123,15 +131,18 @@ class DisableMFAMutation(graphene.Mutation):
     def mutate(cls, root, info, otp_code):
         user = info.context.user
         if user.is_anonymous:
-            return DisableMFAMutation(ok=False, errors=["User is not authenticated."])
+            return DisableTotpMutation(ok=False, errors=["User is not authenticated."])
 
-        if not user.mfa_totp_setup_complete:
-            return DisableMFAMutation(ok=False, errors=["MFA is not enabled."])
+        if not user.mfa_totp_secret:
+            return DisableTotpMutation(ok=False, errors=["MFA setup has not been initiated."])
         
+        if not user.mfa_totp_setup_complete:
+            return DisableTotpMutation(ok=False, errors=["MFA is not enabled."])
+
         totp = pyotp.TOTP(user.mfa_totp_secret)
         if not totp.verify(otp_code):
             logger.warning(f"MFA disable failed for user {user.email}: Invalid OTP code.")
-            return DisableMFAMutation(ok=False, errors=["Invalid OTP code."])
+            return DisableTotpMutation(ok=False, errors=["Invalid OTP code."])
 
         # This mutation disables the entire TOTP method.
         user.mfa_totp_secret = None
@@ -150,49 +161,169 @@ class DisableMFAMutation(graphene.Mutation):
             logger.error(f"Failed to send MFA disabling email for {user.email}: {e}")
 
         logger.info(f"MFA disabled for user {user.email}")
-        return DisableMFAMutation(ok=True, errors=None)
+        return DisableTotpMutation(ok=True, errors=None)
 
-class ToggleEmailMfaMutation(graphene.Mutation):
-    """
-    Enables or disables MFA via Email for the authenticated user.
-    """
+# --- Email MFA Mutations ---
+
+class InitiateEmailMfaSetupMutation(graphene.Mutation):
+    """Sends a verification code to the user's email to start MFA setup."""
     class Arguments:
-        enable = graphene.Boolean(required=True)
+        pass
 
     ok = graphene.Boolean()
-    errors = graphene.List(graphene.String)
+    message = graphene.String()
 
     @classmethod
-    def mutate(cls, root, info, enable):
+    def mutate(cls, root, info):
         user = info.context.user
         if not user.is_authenticated:
-            raise GraphQLError("You must be logged in to manage MFA.")
+            raise GraphQLError("You must be logged in.")
+        if user.mfa_email_enabled:
+            raise GraphQLError("Email MFA is already enabled.")
 
-        user.mfa_email_enabled = enable
-        user.save(update_fields=['mfa_email_enabled'])
+        otp = generate_otp()
+        set_user_otp(user, otp, purpose='mfa_setup') # Using purpose to distinguish OTPs
 
-        # Optionally, send a notification email about the change
-        template_id = 'mfa_email_enabled' if enable else 'mfa_email_disabled'
-        # Note: You would need to create these new templates in the email-service.
-        # For now, we are reusing the MFA disabled template as a placeholder.
-        if not enable:
-            try:
-                context = {"first_name": user.first_name or "user"}
-                send_templated_email(
-                    recipient=user.email,
-                    template_id='mfa_disabled', # Placeholder
-                    context=context
-                )
-            except Exception as e:
-                logger.error(f"Failed to send MFA email status change email for {user.email}: {e}")
+        try:
+            send_templated_email(
+                recipient=user.email,
+                template_id='mfa_setup_otp',
+                context={"first_name": user.first_name or "user", "otp_code": otp}
+            )
+            logger.info(f"Email MFA setup OTP sent to {user.email}.")
+            return cls(ok=True, message="A verification code has been sent to your email.")
+        except Exception as e:
+            logger.error(f"Failed to send email MFA setup OTP to {user.email}: {e}")
+            raise GraphQLError("Failed to send verification email.")
 
-        logger.info(f"Email MFA has been {'enabled' if enable else 'disabled'} for user {user.email}.")
+class VerifyEmailMfaSetupMutation(graphene.Mutation):
+    """Verifies the code and enables Email MFA."""
+    class Arguments:
+        otp_code = graphene.String(required=True)
+
+    ok = graphene.Boolean()
+
+    @classmethod
+    @transaction.atomic
+    def mutate(cls, root, info, otp_code):
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("You must be logged in.")
+
+        if not verify_otp(otp_code, user.mfa_otp, purpose='mfa_setup'):
+            raise GraphQLError("Invalid or expired OTP code.")
+        
+        user.mfa_email_enabled = True
+        user.mfa_otp = None
+        user.mfa_otp_expires_at = None
+        user.save()
+        
+        logger.info(f"Email MFA successfully enabled for user {user.email}.")
         return cls(ok=True)
 
+class DisableEmailMfaMutation(graphene.Mutation):
+    """Disables Email MFA after verifying the user's password."""
+    class Arguments:
+        password = graphene.String(required=True)
+    
+    ok = graphene.Boolean()
+
+    @classmethod
+    @transaction.atomic
+    def mutate(cls, root, info, password):
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("You must be logged in.")
+        
+        _check_user_password(user, password)
+        
+        user.mfa_email_enabled = False
+        user.save(update_fields=['mfa_email_enabled'])
+        logger.info(f"Email MFA disabled for user {user.email}.")
+        return cls(ok=True)
+
+# --- SMS MFA Mutations ---
+
+class InitiateSmsMfaSetupMutation(graphene.Mutation):
+    """Sends a verification code to the user's phone to start MFA setup."""
+    class Arguments:
+        pass
+
+    ok = graphene.Boolean()
+    message = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info):
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("You must be logged in.")
+        if not user.phone_number_verified:
+            raise GraphQLError("You must have a verified phone number to enable SMS MFA.")
+        if user.mfa_sms_enabled:
+            raise GraphQLError("SMS MFA is already enabled.")
+
+        otp = generate_otp()
+        set_user_otp(user, otp, purpose='mfa_setup')
+
+        try:
+            message = f"Your AfyaFlow verification code is: {otp}"
+            send_sms(recipient=user.phone_number, message=message)
+            logger.info(f"SMS MFA setup OTP sent to phone number for user {user.email}.")
+            return cls(ok=True, message="A verification code has been sent to your phone.")
+        except Exception as e:
+            logger.error(f"Failed to send SMS MFA setup OTP for user {user.email}: {e}")
+            raise GraphQLError("Failed to send verification SMS.")
+
+class VerifySmsMfaSetupMutation(graphene.Mutation):
+    """Verifies the code and enables SMS MFA."""
+    class Arguments:
+        otp_code = graphene.String(required=True)
+
+    ok = graphene.Boolean()
+
+    @classmethod
+    @transaction.atomic
+    def mutate(cls, root, info, otp_code):
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("You must be logged in.")
+
+        if not verify_otp(otp_code, user.mfa_otp, purpose='mfa_setup'):
+            raise GraphQLError("Invalid or expired OTP code.")
+        
+        user.mfa_sms_enabled = True
+        user.mfa_otp = None
+        user.mfa_otp_expires_at = None
+        user.save()
+        
+        logger.info(f"SMS MFA successfully enabled for user {user.email}.")
+        return cls(ok=True)
+
+class DisableSmsMfaMutation(graphene.Mutation):
+    """Disables SMS MFA after verifying the user's password."""
+    class Arguments:
+        password = graphene.String(required=True)
+    
+    ok = graphene.Boolean()
+
+    @classmethod
+    @transaction.atomic
+    def mutate(cls, root, info, password):
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("You must be logged in.")
+        
+        _check_user_password(user, password)
+        
+        user.mfa_sms_enabled = False
+        user.save(update_fields=['mfa_sms_enabled'])
+        logger.info(f"SMS MFA disabled for user {user.email}.")
+        return cls(ok=True)
+
+# --- Phone Number Management (remains the same) ---
+
 class AddPhoneNumberMutation(graphene.Mutation):
-    """
-    Adds a phone number to a user's account and sends a verification OTP.
-    """
+    """Adds a phone number to a user's account and sends a verification OTP."""
     class Arguments:
         phone_number = graphene.String(required=True)
 
@@ -235,9 +366,7 @@ class AddPhoneNumberMutation(graphene.Mutation):
         return cls(ok=True, message="A verification code has been sent to your phone.")
 
 class VerifyPhoneNumberMutation(graphene.Mutation):
-    """
-    Verifies the OTP sent to a user's phone number.
-    """
+    """Verifies the OTP sent to a user's phone number."""
     class Arguments:
         otp_code = graphene.String(required=True)
 
@@ -266,73 +395,4 @@ class VerifyPhoneNumberMutation(graphene.Mutation):
         user.save(update_fields=['phone_number_verified', 'mfa_otp', 'mfa_otp_expires_at'])
 
         logger.info(f"Phone number successfully verified for user {user.email}.")
-        return cls(ok=True)
-
-class ToggleSmsMfaMutation(graphene.Mutation):
-    """
-    Enables or disables MFA via SMS for the authenticated user,
-    provided they have a verified phone number.
-    """
-    class Arguments:
-        enable = graphene.Boolean(required=True)
-
-    ok = graphene.Boolean()
-    errors = graphene.List(graphene.String)
-
-    @classmethod
-    def mutate(cls, root, info, enable):
-        user = info.context.user
-        if not user.is_authenticated:
-            raise GraphQLError("You must be logged in to manage MFA.")
-
-        if enable and not user.phone_number_verified:
-            raise GraphQLError("You must have a verified phone number to enable SMS MFA.")
-
-        user.mfa_sms_enabled = enable
-        user.save(update_fields=['mfa_sms_enabled'])
-        logger.info(f"SMS MFA has been {'enabled' if enable else 'disabled'} for user {user.email}.")
-        return cls(ok=True)
-
-class ToggleTotpMfaMutation(graphene.Mutation):
-    """
-    Enables or disables MFA via TOTP for the authenticated user,
-    provided they have completed the setup process.
-    """
-    class Arguments:
-        enable = graphene.Boolean(required=True)
-
-    ok = graphene.Boolean()
-    errors = graphene.List(graphene.String)
-
-    @classmethod
-    def mutate(cls, root, info, enable):
-        user = info.context.user
-        if not user.is_authenticated:
-            raise GraphQLError("You must be logged in to manage MFA.")
-
-        if enable and not user.mfa_totp_setup_complete:
-            raise GraphQLError("You must set up an authenticator app before enabling TOTP MFA.")
-
-        # In our model, we don't have a separate 'mfa_totp_enabled' flag.
-        # The presence of a verified secret implies it can be used.
-        # This mutation could be used to clear the secret if the user wants to truly disable it,
-        # but for now, we will treat 'setup_complete' as 'enabled'.
-        # If we add a specific `mfa_totp_enabled` field later, this logic would change.
-        
-        # For now, this mutation doesn't change state but confirms status.
-        # A more complete implementation might be to disable it by clearing the secret.
-        is_enabled = user.mfa_totp_setup_complete
-        
-        logger.info(f"TOTP MFA status check: {'enabled' if is_enabled else 'disabled'} for user {user.email}.")
-        
-        if enable and not is_enabled:
-             return cls(ok=False, errors=["TOTP setup is not complete."])
-        if not enable and is_enabled:
-            # To truly disable, we would clear the secret here.
-            # user.mfa_totp_secret = None
-            # user.mfa_totp_setup_complete = False
-            # user.save(...)
-             return cls(ok=False, errors=["Disabling via this toggle is not yet implemented. Use the 'disableMfa' mutation with an OTP code."])
-
-
         return cls(ok=True)

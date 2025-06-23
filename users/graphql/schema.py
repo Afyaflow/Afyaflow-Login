@@ -18,13 +18,17 @@ from .mutations.profile import (
     ConfirmPasswordResetMutation,
 )
 from .mutations.mfa import (
-    InitiateMFASetupMutation,
-    VerifyMFASetupMutation,
-    DisableMFAMutation,
-    ToggleEmailMfaMutation,
+    InitiateTotpSetupMutation,
+    VerifyTotpSetupMutation,
+    DisableTotpMutation,
+    InitiateEmailMfaSetupMutation,
+    VerifyEmailMfaSetupMutation,
+    DisableEmailMfaMutation,
+    InitiateSmsMfaSetupMutation,
+    VerifySmsMfaSetupMutation,
+    DisableSmsMfaMutation,
     AddPhoneNumberMutation,
     VerifyPhoneNumberMutation,
-    ToggleSmsMfaMutation,
 )
 from .mutations.verification import (
     VerifyEmailMutation,
@@ -55,13 +59,24 @@ class UserMutation(graphene.ObjectType):
     resend_verification_email = ResendVerificationEmailMutation.Field()
 
     # MFA Management
-    initiate_mfa_setup = InitiateMFASetupMutation.Field(description="Initiates the MFA setup process for the authenticated user.")
-    verify_mfa_setup = VerifyMFASetupMutation.Field(description="Verifies the OTP code and enables MFA for the user.")
-    disable_mfa = DisableMFAMutation.Field(description="Disables MFA for the authenticated user after verification.")
-    toggle_email_mfa = ToggleEmailMfaMutation.Field(description="Enables or disables Email as an MFA factor.")
+    # TOTP
+    initiate_totp_setup = InitiateTotpSetupMutation.Field()
+    verify_totp_setup = VerifyTotpSetupMutation.Field()
+    disable_totp = DisableTotpMutation.Field()
+    
+    # Email MFA
+    initiate_email_mfa_setup = InitiateEmailMfaSetupMutation.Field()
+    verify_email_mfa_setup = VerifyEmailMfaSetupMutation.Field()
+    disable_email_mfa = DisableEmailMfaMutation.Field()
+
+    # SMS MFA
+    initiate_sms_mfa_setup = InitiateSmsMfaSetupMutation.Field()
+    verify_sms_mfa_setup = VerifySmsMfaSetupMutation.Field()
+    disable_sms_mfa = DisableSmsMfaMutation.Field()
+
+    # Phone Management
     add_phone_number = AddPhoneNumberMutation.Field(description="Adds a phone number and sends a verification code.")
     verify_phone_number = VerifyPhoneNumberMutation.Field(description="Verifies the OTP sent to a phone number.")
-    toggle_sms_mfa = ToggleSmsMfaMutation.Field(description="Enables or disables SMS as an MFA factor.")
 
 
 # Build the federated schema
