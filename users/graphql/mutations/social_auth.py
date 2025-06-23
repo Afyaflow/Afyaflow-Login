@@ -57,9 +57,22 @@ class GoogleLoginMutation(BaseSocialAuthMutation):
             if id_token:
                 token.token_secret = id_token
 
+            # Fetch user info from Google
+            headers = {"Authorization": f"Bearer {access_token}"}
+            response = requests.get('https://www.googleapis.com/oauth2/v3/userinfo', headers=headers)
+            if response.status_code != 200:
+                raise Exception("Failed to get user info from Google")
+            
+            # Create a response object that the adapter expects
+            oauth2_response = type('OAuth2Response', (), {
+                'status_code': response.status_code,
+                'text': response.text,
+                'json': lambda: response.json()
+            })()
+
             # Get user info from Google
             provider = adapter.get_provider()
-            user_info = adapter.complete_login(info.context, app, token)
+            user_info = adapter.complete_login(info.context, app, token, response=oauth2_response)
             user_info.token = token
 
             # Create social login instance
@@ -104,9 +117,22 @@ class MicrosoftLoginMutation(BaseSocialAuthMutation):
             if id_token:
                 token.token_secret = id_token
 
+            # Fetch user info from Microsoft Graph API
+            headers = {"Authorization": f"Bearer {access_token}"}
+            response = requests.get('https://graph.microsoft.com/v1.0/me', headers=headers)
+            if response.status_code != 200:
+                raise Exception("Failed to get user info from Microsoft")
+            
+            # Create a response object that the adapter expects
+            oauth2_response = type('OAuth2Response', (), {
+                'status_code': response.status_code,
+                'text': response.text,
+                'json': lambda: response.json()
+            })()
+
             # Get user info from Microsoft
             provider = adapter.get_provider()
-            user_info = adapter.complete_login(info.context, app, token)
+            user_info = adapter.complete_login(info.context, app, token, response=oauth2_response)
             user_info.token = token
 
             # Create social login instance
