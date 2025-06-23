@@ -16,7 +16,14 @@ class GraphQLJWTMiddleware:
         self.authenticator = JWTAuthentication()
 
     def __call__(self, request):
-        request.user = SimpleLazyObject(lambda: self.get_user(request))
+        # Skip JWT auth for admin routes and non-GraphQL paths
+        if request.path.startswith('/admin/') or request.path.startswith('/accounts/'):
+            return self.get_response(request)
+
+        # Only handle GraphQL requests
+        if 'graphql' in request.path:
+            request.user = SimpleLazyObject(lambda: self.get_user(request))
+        
         return self.get_response(request)
 
     def get_user(self, request):
