@@ -68,30 +68,32 @@ def get_organization_permissions(user_id: str, organization_id: str) -> list:
 
 def get_user_organization_memberships(user_id: str) -> list:
     """
-    Fetches the list of organizations a user is a member of from the Org Service.
+    Fetches a user's organization memberships from the Organization Service.
+    Returns a list of organization membership data.
     """
     query = """
-        query GetUserOrganizationMemberships($userId: String!) {
-            organizationMemberships(where: { userId: { equals: $userId } }) {
-                organization {
-                    id
-                    name
-                }
+    query GetUserMemberships($userId: UUID!) {
+        userOrganizationMemberships(userId: $userId) {
+            organization {
+                id
+                name
+                type
+                status
             }
+            role
+            status
+            isDefault
         }
+    }
     """
-    variables = {"userId": str(user_id)}
-
-    response_data = _execute_org_service_query(query, variables)
-
-    if not response_data or 'errors' in response_data:
-        logger.error(f"Error fetching organization memberships from Org Service: {response_data.get('errors')}")
-        return []
-
-    memberships = response_data.get('data', {}).get('organizationMemberships', [])
+    variables = {'userId': str(user_id)}
+    result = _execute_org_service_query(query, variables)
     
-    logger.info(f"Fetched {len(memberships)} organization memberships for user {user_id}")
-    return memberships
+    try:
+        return result.get('data', {}).get('userOrganizationMemberships', [])
+    except Exception as e:
+        logger.error(f"Error parsing organization memberships: {e}")
+        return []
 
 
 def _claim_pending_invitations(user: User):
@@ -151,8 +153,18 @@ def create_auth_payload(user, mfa_required=False, mfa_token=None, enabled_mfa_me
 
     # 3. If MFA is not required, generate and add tokens
     if not mfa_required:
+        # Create access token
         access_token_str, _ = create_token(user.id, token_type='access')
-        refresh_token_str, refresh_token_obj = create_token(user.id, token_type='refresh')
+        
+        # Create and store refresh token
+        refresh_token_str, refresh_expires_at = create_token(user.id, token_type='refresh')
+        
+        # Store the refresh token in the database
+        RefreshToken.objects.create(
+            user=user,
+            token=refresh_token_str,
+            expires_at=refresh_expires_at
+        )
 
         payload["access_token"] = access_token_str
         payload["refresh_token"] = refresh_token_str
