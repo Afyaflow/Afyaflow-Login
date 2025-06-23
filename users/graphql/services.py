@@ -4,7 +4,6 @@ from django.conf import settings
 from django.utils import timezone
 from ..models import User, RefreshToken
 from ..authentication import create_token, create_oct_token
-from .organizations import get_user_organization_memberships
 from datetime import timedelta
 
 # Initialize logger
