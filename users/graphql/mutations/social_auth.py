@@ -87,7 +87,8 @@ class GoogleLoginMutation(BaseSocialAuthMutation):
                         email=email,
                         first_name=user_data.get('given_name', ''),
                         last_name=user_data.get('family_name', ''),
-                        is_active=True
+                        is_active=True,
+                        email_verified=True  # Set email as verified for social login
                     )
                     user.set_unusable_password()
                     user.save()
@@ -173,7 +174,8 @@ class MicrosoftLoginMutation(BaseSocialAuthMutation):
                         email=email,
                         first_name=user_data.get('givenName', ''),
                         last_name=user_data.get('surname', ''),
-                        is_active=True
+                        is_active=True,
+                        email_verified=True  # Set email as verified for social login
                     )
                     user.set_unusable_password()
                     user.save()
