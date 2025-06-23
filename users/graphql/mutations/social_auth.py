@@ -28,6 +28,13 @@ class BaseSocialAuthMutation(graphene.Mutation):
     def mutate(cls, root, info, **kwargs):
         raise NotImplementedError("Subclasses must implement mutate method")
 
+    @classmethod
+    def get_social_app(cls, provider):
+        try:
+            return SocialApp.objects.get(provider=provider)
+        except SocialApp.DoesNotExist:
+            raise Exception(f"No social app configured for provider: {provider}")
+
 class GoogleLoginMutation(BaseSocialAuthMutation):
     """Handles Google OAuth2 authentication."""
     
@@ -35,13 +42,12 @@ class GoogleLoginMutation(BaseSocialAuthMutation):
     def mutate(cls, root, info, access_token, id_token=None):
         try:
             adapter = GoogleOAuth2Adapter(info.context)
-            app = SocialApp.objects.get_current('google')
+            app = cls.get_social_app('google')
             
             # Create token
             token = SocialToken(
                 app=app,
                 token=access_token,
-                token_secret='',  # Not used for OAuth2
             )
             if id_token:
                 token.token_secret = id_token
@@ -83,13 +89,12 @@ class MicrosoftLoginMutation(BaseSocialAuthMutation):
     def mutate(cls, root, info, access_token, id_token=None):
         try:
             adapter = MicrosoftGraphOAuth2Adapter(info.context)
-            app = SocialApp.objects.get_current('microsoft')
+            app = cls.get_social_app('microsoft')
             
             # Create token
             token = SocialToken(
                 app=app,
                 token=access_token,
-                token_secret='',  # Not used for OAuth2
             )
             if id_token:
                 token.token_secret = id_token
