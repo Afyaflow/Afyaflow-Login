@@ -64,12 +64,12 @@ INSTALLED_APPS = [
     'graphene_django',
     # Local apps
     'users',
-    'users.social_auth.apps.SocialAuthAppConfig',
     # Allauth apps
     'allauth',
     'allauth.account',
     'allauth.socialaccount',
-    'allauth.socialaccount.providers.google', # For Google OAuth
+    'allauth.socialaccount.providers.google',
+    'allauth.socialaccount.providers.microsoft',
 ]
 
 MIDDLEWARE = [
@@ -168,36 +168,29 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = 'users.User'
 
 AUTHENTICATION_BACKENDS = [
-    # Needed to login by username in Django admin, regardless of `allauth`
     'django.contrib.auth.backends.ModelBackend',
-    # `allauth` specific authentication methods, such as login by e-mail
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
 SITE_ID = 1
 
 # Allauth settings
-ACCOUNT_LOGIN_METHODS = ['email'] # 
-ACCOUNT_SIGNUP_FIELDS = ['email'] # For programmatic use
-ACCOUNT_EMAIL_VERIFICATION = 'optional' 
-ACCOUNT_LOGIN_ON_EMAIL_CONFIRMATION = True # Logs user in after email confirmation
-ACCOUNT_LOGIN_ON_PASSWORD_RESET = True # Logs user in after password reset
-# LOGIN_REDIRECT_URL = '/'  # Or frontend URL where user is redirected after login
-# ACCOUNT_LOGOUT_REDIRECT_URL = '/'
-SOCIALACCOUNT_ADAPTER = 'allauth.socialaccount.adapter.DefaultSocialAccountAdapter'
+ACCOUNT_AUTHENTICATION_METHOD = 'email'
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_UNIQUE_EMAIL = True
+ACCOUNT_USERNAME_REQUIRED = False
+ACCOUNT_USER_MODEL_USERNAME_FIELD = None
+ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
+ACCOUNT_EMAIL_SUBJECT_PREFIX = '[AfyaFlow] '
+ACCOUNT_DEFAULT_HTTP_PROTOCOL = 'https'
 ACCOUNT_ADAPTER = 'allauth.account.adapter.DefaultAccountAdapter'
-# Ensure our user model's email field is used as the username
-ACCOUNT_USER_MODEL_USERNAME_FIELD = None # We use email, so no username field
-ACCOUNT_USER_MODEL_EMAIL_FIELD = 'email'
-
+SOCIALACCOUNT_ADAPTER = 'allauth.socialaccount.adapter.DefaultSocialAccountAdapter'
+SOCIALACCOUNT_EMAIL_VERIFICATION = 'none'  # Since we verify through the provider
+SOCIALACCOUNT_EMAIL_REQUIRED = True
+SOCIALACCOUNT_QUERY_EMAIL = True
+SOCIALACCOUNT_STORE_TOKENS = True
 SOCIALACCOUNT_PROVIDERS = {
     'google': {
-        
-        'APP': {
-            'client_id': os.getenv('GOOGLE_OAUTH_CLIENT_ID'),
-            'secret': os.getenv('GOOGLE_OAUTH_CLIENT_SECRET'),
-            'key': ''
-        },
         'SCOPE': [
             'profile',
             'email',
@@ -205,6 +198,13 @@ SOCIALACCOUNT_PROVIDERS = {
         'AUTH_PARAMS': {
             'access_type': 'online',
         }
+    },
+    'microsoft': {
+        'SCOPE': [
+            'profile',
+            'email',
+            'openid',
+        ],
     }
 }
 

@@ -7,7 +7,7 @@ from django.utils import timezone
 from graphql import GraphQLError
 
 from ..types import AuthPayloadType, OrganizationStub, MfaChallengeType, LoginPayload, ScopedAuthPayload, GetScopedAccessTokenPayload
-from ..services import GoogleAuthService, create_auth_payload, get_user_organization_memberships
+from ..services import create_auth_payload, get_user_organization_memberships
 from ...models import RefreshToken, User
 from ...serializers import UserRegistrationSerializer
 from ...authentication import create_token, JWTAuthentication, create_oct_token
@@ -284,36 +284,3 @@ class GetScopedAccessToken(graphene.Mutation):
         )
         
         return cls(payload=scoped_payload)
-
-class LoginWithGoogleMutation(graphene.Mutation):
-    """Logs in a user using their Google account."""
-    class Arguments:
-        id_token = graphene.String(required=True)
-
-    auth_payload = graphene.Field(AuthPayloadType)
-    errors = graphene.List(graphene.String)
-
-    @classmethod
-    @transaction.atomic
-    def mutate(cls, root, info, id_token):
-        try:
-            google_auth = GoogleAuthService(id_token)
-            token_info = google_auth.validate_token()
-            user = google_auth.get_or_create_user(token_info)
-
-            if not user.is_active:
-                logger.warning(f"Google login failed for {user.email}: User account is not active.")
-                return cls(auth_payload=None, errors=["Your account is not active."])
-            
-            django_login(info.context, user, backend='allauth.account.auth_backends.AuthenticationBackend')
-            
-            auth_data = create_auth_payload(user)
-            
-            return cls(auth_payload=AuthPayloadType(**auth_data))
-
-        except ValueError as e:
-            logger.error(f"Google login failed: {e}")
-            return cls(auth_payload=None, errors=[str(e)])
-        except Exception as e:
-            logger.error(f"An unexpected error occurred during Google login: {e}")
-            return cls(auth_payload=None, errors=["An unexpected server error occurred."])
