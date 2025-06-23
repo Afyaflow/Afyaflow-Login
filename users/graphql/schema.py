@@ -10,6 +10,10 @@ from .mutations.auth import (
     LogoutMutation,
     GetScopedAccessToken,
 )
+from .mutations.social_auth import (
+    GoogleLoginMutation,
+    MicrosoftLoginMutation,
+)
 from .mutations.profile import (
     UpdateProfileMutation,
     ChangePasswordMutation,
@@ -46,6 +50,10 @@ class UserMutation(graphene.ObjectType):
     refresh_token = RefreshTokenMutation.Field()
     logout = LogoutMutation.Field()
     get_scoped_access_token = GetScopedAccessToken.Field(description="Issues an Organization Context Token (OCT) for a specific organization.")
+    
+    # Social Auth
+    login_with_google = GoogleLoginMutation.Field(description="Login with Google OAuth2")
+    login_with_microsoft = MicrosoftLoginMutation.Field(description="Login with Microsoft OAuth2")
     
     update_profile = UpdateProfileMutation.Field()
     change_password = ChangePasswordMutation.Field()
