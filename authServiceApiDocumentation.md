@@ -8,9 +8,9 @@ This document outlines the GraphQL API for the AfyaFlow Auth Service. It provide
 
 The AfyaFlow Auth Service is responsible for:
 *   User registration and login (email/password).
-*   Social authentication via Google OAuth 2.0.
+*   Social authentication via Google, Microsoft, and LinkedIn.
 *   JSON Web Token (JWT) management for session control (access and refresh tokens).
-*   Multi-Factor Authentication (MFA) setup and verification.
+*   Multi-Factor Authentication (MFA) setup and verification, including for social logins.
 *   User profile management (name, password changes).
 
 The primary interface for these operations is a GraphQL API.
@@ -21,24 +21,24 @@ The primary interface for these operations is a GraphQL API.
 
 ### 1. JWT (JSON Web Token) Authentication
 
-*   **Obtaining Tokens:** JWTs (access and refresh tokens) are provided upon successful user registration (`register` mutation) or login (`login`, `loginWithGoogle` mutations) within the `AuthPayloadType`.
+*   **Obtaining Tokens:** JWTs (access and refresh tokens) are provided upon successful user registration (`register` mutation) or login (`login`, `loginWithGoogle`, etc.) within the `AuthPayloadType`.
 *   **Using Access Tokens:** For authenticated requests to the GraphQL API, the client must include the access token in the `Authorization` header with the `Bearer` scheme:
     ```
     Authorization: Bearer <your_access_token>
     ```
 *   **Access Token Lifetime:** Access tokens are short-lived (default: 30 minutes).
-*   **Refresh Tokens:** When an access token expires, a new one can be obtained using the `refreshToken` mutation, providing the longer-lived refresh token. Refresh tokens are stored by the system and associated with the user.
+*   **Refresh Tokens:** When an access token expires, a new one can be obtained using the `refreshToken` mutation, providing the longer-lived refresh token.
 *   **Logout:** The `logout` mutation invalidates the provided refresh token.
 
-### 2. Google OAuth 2.0
+### 2. Social Authentication (OAuth 2.0)
 
-*   Users can register or log in using their Google accounts.
-*   **Flow:**
-    1.  The client application obtains an `id_token` from Google upon successful user authentication on the frontend.
-    2.  This `id_token` is sent to the `loginWithGoogle` GraphQL mutation.
-    3.  The backend verifies the `id_token` with Google, then either creates a new AfyaFlow user (if one doesn't exist for that Google account's email) or logs in the existing user.
-    4.  JWTs (access and refresh tokens) are returned, similar to email/password login.
-*   **Django-Allauth:** The underlying Google OAuth flow (communication with Google, user creation/linking) is facilitated by `django-allauth`. Standard `django-allauth` views are also available under the `/accounts/` path (e.g., `/accounts/google/login/` to initiate the flow from a web context if needed).
+*   Users can register or log in using their Google, Microsoft, or LinkedIn accounts.
+*   **Flow**:
+    1.  The frontend client performs the OAuth 2.0 flow to obtain an **`access_token`** from the social provider.
+    2.  The client sends this `access_token` to the corresponding backend mutation (e.g., `loginWithGoogle`).
+    3.  The backend verifies the token by using it to fetch the user's profile from the provider's API.
+    4.  The backend creates a new user or logs in an existing one.
+    5.  The backend returns an `AuthPayloadType`, which will either contain JWTs or an MFA challenge if MFA is enabled for the user.
 
 ---
 
@@ -214,15 +214,14 @@ Obtains a new access token using a valid refresh token.
 
 *   **Arguments:**
     *   `refreshToken: String!`
-*   **Returns:** returns `accessToken: String`, `user: UserType`, `errors: [String]` 
-*   **Description:** Issues a new access token if the refresh token is valid and not revoked.
+*   **Returns:** `accessToken: String`, `errors: [String]` 
+*   **Description:** Issues a new access token if the refresh token is valid, unexpired, and not revoked.
 
 *   **Example:**
      ```graphql
     mutation RefreshUserToken {
       refreshToken(refreshToken: "your_long_lived_refresh_token_here") {
         accessToken # New access token
-        user { id email } # Typically includes user for context
         errors
       }
     }
@@ -234,7 +233,7 @@ Logs out a user by revoking their refresh token.
 
 *   **Arguments:**
     *   `refreshToken: String!`
-*   **Returns:** `ok: Boolean`, `message: String`, `errors: [String]`
+*   **Returns:** `ok: Boolean`, `errors: [String]`
 *   **Description:** Invalidates the provided refresh token, effectively logging the user out from sessions relying on it.
 
 *   **Example:**
@@ -242,7 +241,6 @@ Logs out a user by revoking their refresh token.
     mutation LogoutUser {
       logout(refreshToken: "user_refresh_token_to_revoke") {
         ok
-        message
         errors
       }
     }
@@ -279,7 +277,7 @@ Allows an authenticated user to change their password. Requires authentication.
     *   `oldPassword: String!`
     *   `newPassword: String!`
     *   `newPasswordConfirm: String!`
-*   **Returns:** `ok: Boolean`, `message: String`, `errors: [String]`
+*   **Returns:** `ok: Boolean`, `errors: [String]`
 *   **Description:** Updates the user's password after verifying the old one.
 
 *   **Example:**
@@ -291,7 +289,6 @@ Allows an authenticated user to change their password. Requires authentication.
         newPasswordConfirm: "NewStrongPassword456!"
       ) {
         ok
-        message
         errors
       }
     }
@@ -396,6 +393,61 @@ Logs in or registers a user using a Google ID Token.
       }
     }
     ```
+
+### 11. `loginWithMicrosoft`
+Authenticates a user with a Microsoft `access_token`.
+
+*   **Arguments:**
+    *   `accessToken: String!`
+*   **Returns:** `authPayload: AuthPayloadType`, `errors: [String]`
+*   **Description:** Works identically to `loginWithGoogle`, but for Microsoft accounts.
+
+### 12. `loginWithLinkedin`
+Authenticates a user with a LinkedIn `access_token`.
+
+*   **Arguments:**
+    *   `accessToken: String!`
+*   **Returns:** `authPayload: AuthPayloadType`, `errors: [String]`
+*   **Description:** Works identically to `loginWithGoogle`, but for LinkedIn accounts. Note: The LinkedIn app in the developer portal must have the `r_liteprofile` and `r_emailaddress` scopes.
+
+### 13. `verifyMfa`
+Verifies an OTP code to complete a login attempt.
+
+*   **Arguments:**
+    *   `mfaToken: String!`
+    *   `otpCode: String!`
+*   **Returns:** `authPayload: AuthPayloadType`, `errors: [String]`
+*   **Description:** Takes the `mfaToken` from a challenged login and the user-provided OTP. On success, it returns the final `AuthPayloadType` with JWTs.
+
+### 14. `verifyEmail`
+Verifies a user's email address using an OTP.
+
+*   **Arguments:**
+    *   `otpCode: String!`
+*   **Returns:** `authPayload: AuthPayloadType`, `errors: [String]`
+*   **Description:** Verifies the OTP sent during registration. Returns a full auth payload on success.
+
+### 15. `resendVerificationEmail`
+Resends the email verification OTP.
+
+*   **Arguments:** None
+*   **Returns:** `ok: Boolean`, `message: String`, `errors: [String]`
+
+### 16. `initiatePasswordReset`
+Sends an OTP to a user's email or phone to start the password reset process.
+
+*   **Arguments:** `emailOrPhone: String!`
+*   **Returns:** `ok: Boolean`, `message: String`
+
+### 17. `resetPasswordWithOtp`
+Resets the password using a valid OTP.
+
+*   **Arguments:**
+    *   `emailOrPhone: String!`
+    *   `otpCode: String!`
+    *   `newPassword: String!`
+    *   `newPasswordConfirm: String!`
+*   **Returns:** `ok: Boolean`, `errors: [String]`
 
 ---
 

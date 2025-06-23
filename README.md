@@ -15,7 +15,10 @@ The AfyaFlow Auth Service is a centralized, standalone Django application respon
     -   Email OTP
     -   SMS OTP
 -   **Contact Verification:** Flows for verifying user email addresses and phone numbers.
--   **Social Login:** Supports login and registration via Google.
+-   **Social Login:** Secure login and registration via major providers, fully integrated with the MFA system. Powered by `django-allauth`.
+    -   Google
+    -   Microsoft
+    -   LinkedIn
 -   **Federated Authorization:** Issues Organization Context Tokens (OCTs) for role-based access control in other services.
 
 ---
@@ -54,7 +57,9 @@ Key variables to configure:
 -   `SECRET_KEY`: Your Django secret key.
 -   `DATABASE_URL`: The connection string for your PostgreSQL database (e.g., `postgres://user:password@localhost:5432/afyaflow_auth_db`).
 -   `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, etc.: Credentials for your SMTP service for sending emails.
--   `GOOGLE_OAUTH2_CLIENT_ID`: The client ID for Google social login.
+-   `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_SECRET`: Credentials for Google social login.
+-   `MICROSOFT_GRAPH_CLIENT_ID`, `MICROSOFT_GRAPH_SECRET`: Credentials for Microsoft social login.
+-   `LINKEDIN_OAUTH2_CLIENT_ID`, `LINKEDIN_OAUTH2_SECRET`: Credentials for LinkedIn social login.
 
 ### 3. Database Setup
 
@@ -98,7 +103,17 @@ Completes the second step of an MFA login.
 
 #### `loginWithGoogle`
 Logs in or registers a user with their Google account.
--   **Arguments:** `idToken` (from Google Sign-In SDK)
+-   **Arguments:** `accessToken` (from Google Sign-In SDK)
+-   **Returns:** `AuthPayloadType` (may require MFA verification).
+
+#### `loginWithMicrosoft`
+Logs in or registers a user with their Microsoft account.
+-   **Arguments:** `accessToken` (from MSAL)
+-   **Returns:** `AuthPayloadType` (may require MFA verification).
+
+#### `loginWithLinkedin`
+Logs in or registers a user with their LinkedIn account.
+-   **Arguments:** `accessToken` (from LinkedIn OAuth flow)
 -   **Returns:** `AuthPayloadType` (may require MFA verification).
 
 #### `refreshToken`
