@@ -123,7 +123,7 @@ class GoogleLoginMutation(BaseSocialAuthMutation):
                 )
 
                 # Log the user in
-                login(info.context, user)
+                login(info.context, user, backend='allauth.account.auth_backends.AuthenticationBackend')
                 
                 # Create JWT tokens
                 auth_data = create_auth_payload(user)
@@ -201,7 +201,7 @@ class MicrosoftLoginMutation(BaseSocialAuthMutation):
                 )
 
                 # Log the user in
-                login(info.context, user)
+                login(info.context, user, backend='allauth.account.auth_backends.AuthenticationBackend')
                 
                 # Create JWT tokens
                 auth_data = create_auth_payload(user)
