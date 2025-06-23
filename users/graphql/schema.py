@@ -13,6 +13,7 @@ from .mutations.auth import (
 from .mutations.social_auth import (
     GoogleLoginMutation,
     MicrosoftLoginMutation,
+    LinkedInLoginMutation,
 )
 from .mutations.profile import (
     UpdateProfileMutation,
@@ -54,6 +55,7 @@ class UserMutation(graphene.ObjectType):
     # Social Auth
     login_with_google = GoogleLoginMutation.Field(description="Login with Google OAuth2")
     login_with_microsoft = MicrosoftLoginMutation.Field(description="Login with Microsoft OAuth2")
+    login_with_linkedin = LinkedInLoginMutation.Field(description="Login with LinkedIn OAuth2")
     
     update_profile = UpdateProfileMutation.Field()
     change_password = ChangePasswordMutation.Field()

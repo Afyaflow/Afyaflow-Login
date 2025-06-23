@@ -302,4 +302,96 @@ class MicrosoftLoginMutation(BaseSocialAuthMutation):
 
         except Exception as e:
             logger.error(f"Microsoft authentication error: {str(e)}")
+            return cls(auth_payload=None, errors=[str(e)])
+
+class LinkedInLoginMutation(BaseSocialAuthMutation):
+    """Handles LinkedIn OAuth2 authentication."""
+    
+    @classmethod
+    def mutate(cls, root, info, access_token, id_token=None):
+        try:
+            app = cls.get_social_app('linkedin_oauth2', info.context)
+            
+            # 1. Fetch user profile from LinkedIn
+            profile_headers = {"Authorization": f"Bearer {access_token}"}
+            profile_response = requests.get(
+                'https://api.linkedin.com/v2/me?projection=(id,localizedFirstName,localizedLastName)', 
+                headers=profile_headers
+            )
+            if profile_response.status_code != 200:
+                raise Exception("Failed to get user profile from LinkedIn")
+            
+            profile_data = profile_response.json()
+            linkedin_user_id = profile_data.get('id')
+            if not linkedin_user_id:
+                raise Exception("Could not retrieve LinkedIn User ID.")
+
+            # 2. Fetch user email from LinkedIn
+            email_headers = {"Authorization": f"Bearer {access_token}"}
+            email_response = requests.get(
+                'https://api.linkedin.com/v2/emailAddress?q=members&projection=(elements*(handle~))',
+                headers=email_headers
+            )
+            if email_response.status_code != 200:
+                raise Exception("Failed to get user email from LinkedIn")
+            
+            email_data = email_response.json()
+            email = email_data.get('elements', [{}])[0].get('handle~', {}).get('emailAddress')
+            if not email:
+                raise Exception("Email not provided by LinkedIn or not accessible.")
+
+            with transaction.atomic():
+                try:
+                    user = User.objects.get(email=email)
+                    if not user.email_verified:
+                        user.email_verified = True
+                        user.save(update_fields=['email_verified'])
+                    
+                    email_address, created = EmailAddress.objects.get_or_create(user=user, email=user.email)
+                    if not email_address.verified:
+                        email_address.verified = True
+                        email_address.primary = True
+                        email_address.save()
+                except User.DoesNotExist:
+                    user = User.objects.create_user(
+                        email=email,
+                        first_name=profile_data.get('localizedFirstName', ''),
+                        last_name=profile_data.get('localizedLastName', ''),
+                        is_active=True,
+                        email_verified=True
+                    )
+                    user.set_unusable_password()
+                    user.save()
+
+                    EmailAddress.objects.create(
+                        user=user, email=email, primary=True, verified=True
+                    )
+                
+                # Combine user data for storage in SocialAccount
+                user_data = {**profile_data, **email_data}
+
+                social_account, created = SocialAccount.objects.get_or_create(
+                    provider='linkedin_oauth2',
+                    uid=linkedin_user_id,
+                    defaults={'user': user, 'extra_data': user_data}
+                )
+
+                if not created:
+                    social_account.extra_data = user_data
+                    social_account.save()
+
+                social_token, created = SocialToken.objects.get_or_create(
+                    app=app,
+                    account=social_account,
+                    defaults={'token': access_token}
+                )
+
+                if not created:
+                    social_token.token = access_token
+                    social_token.save()
+
+                return cls._handle_login_or_mfa(info, user)
+
+        except Exception as e:
+            logger.error(f"LinkedIn authentication error: {str(e)}")
             return cls(auth_payload=None, errors=[str(e)]) 
