@@ -68,32 +68,30 @@ def get_organization_permissions(user_id: str, organization_id: str) -> list:
 
 def get_user_organization_memberships(user_id: str) -> list:
     """
-    Fetches a user's organization memberships from the Organization Service.
-    Returns a list of organization membership data.
+    Fetches the list of organizations a user is a member of from the Org Service.
     """
     query = """
-    query GetUserMemberships($userId: UUID!) {
-        userOrganizationMemberships(userId: $userId) {
-            organization {
-                id
-                name
-                type
-                status
+        query GetUserOrganizationMemberships($userId: String!) {
+            organizationMemberships(where: { userId: { equals: $userId } }) {
+                organization {
+                    id
+                    name
+                }
             }
-            role
-            status
-            isDefault
         }
-    }
     """
-    variables = {'userId': str(user_id)}
-    result = _execute_org_service_query(query, variables)
-    
-    try:
-        return result.get('data', {}).get('userOrganizationMemberships', [])
-    except Exception as e:
-        logger.error(f"Error parsing organization memberships: {e}")
+    variables = {"userId": str(user_id)}
+
+    response_data = _execute_org_service_query(query, variables)
+
+    if not response_data or 'errors' in response_data:
+        logger.error(f"Error fetching organization memberships from Org Service: {response_data.get('errors')}")
         return []
+
+    memberships = response_data.get('data', {}).get('organizationMemberships', [])
+    
+    logger.info(f"Fetched {len(memberships)} organization memberships for user {user_id}")
+    return memberships
 
 
 def _claim_pending_invitations(user: User):
