@@ -2,6 +2,7 @@ import graphene
 from django.conf import settings
 from django.contrib.auth import login
 from django.db import transaction
+from django.contrib.sites.shortcuts import get_current_site
 from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
 from allauth.socialaccount.providers.microsoft.views import MicrosoftGraphOAuth2Adapter
 from allauth.socialaccount.providers.oauth2.client import OAuth2Client
@@ -29,11 +30,15 @@ class BaseSocialAuthMutation(graphene.Mutation):
         raise NotImplementedError("Subclasses must implement mutate method")
 
     @classmethod
-    def get_social_app(cls, provider):
+    def get_social_app(cls, provider, request):
         try:
-            return SocialApp.objects.get(provider=provider)
+            site = get_current_site(request)
+            return SocialApp.objects.get(provider=provider, sites=site)
         except SocialApp.DoesNotExist:
             raise Exception(f"No social app configured for provider: {provider}")
+        except Exception as e:
+            logger.error(f"Error getting social app: {str(e)}")
+            raise Exception(f"Error getting social app configuration: {str(e)}")
 
 class GoogleLoginMutation(BaseSocialAuthMutation):
     """Handles Google OAuth2 authentication."""
@@ -42,7 +47,7 @@ class GoogleLoginMutation(BaseSocialAuthMutation):
     def mutate(cls, root, info, access_token, id_token=None):
         try:
             adapter = GoogleOAuth2Adapter(info.context)
-            app = cls.get_social_app('google')
+            app = cls.get_social_app('google', info.context)
             
             # Create token
             token = SocialToken(
@@ -89,7 +94,7 @@ class MicrosoftLoginMutation(BaseSocialAuthMutation):
     def mutate(cls, root, info, access_token, id_token=None):
         try:
             adapter = MicrosoftGraphOAuth2Adapter(info.context)
-            app = cls.get_social_app('microsoft')
+            app = cls.get_social_app('microsoft', info.context)
             
             # Create token
             token = SocialToken(

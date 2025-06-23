@@ -172,7 +172,8 @@ AUTHENTICATION_BACKENDS = [
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
-SITE_ID = 1
+# Site ID must match the ID in your database
+SITE_ID = 2  # Changed from 1 to match your database site ID
 
 # Allauth settings
 ACCOUNT_AUTHENTICATION_METHOD = 'email'
