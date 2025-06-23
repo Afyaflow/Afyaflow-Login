@@ -114,13 +114,21 @@ class GoogleLoginMutation(BaseSocialAuthMutation):
                     social_account.extra_data = user_data
                     social_account.save()
 
-                # Create social token
-                social_token = SocialToken.objects.create(
+                # Get or create social token
+                social_token, created = SocialToken.objects.get_or_create(
                     app=app,
                     account=social_account,
-                    token=access_token,
-                    token_secret=id_token if id_token else ''
+                    defaults={
+                        'token': access_token,
+                        'token_secret': id_token if id_token else ''
+                    }
                 )
+
+                if not created:
+                    # Update existing token
+                    social_token.token = access_token
+                    social_token.token_secret = id_token if id_token else ''
+                    social_token.save()
 
                 # Log the user in
                 login(info.context, user, backend='allauth.account.auth_backends.AuthenticationBackend')
@@ -192,13 +200,21 @@ class MicrosoftLoginMutation(BaseSocialAuthMutation):
                     social_account.extra_data = user_data
                     social_account.save()
 
-                # Create social token
-                social_token = SocialToken.objects.create(
+                # Get or create social token
+                social_token, created = SocialToken.objects.get_or_create(
                     app=app,
                     account=social_account,
-                    token=access_token,
-                    token_secret=id_token if id_token else ''
+                    defaults={
+                        'token': access_token,
+                        'token_secret': id_token if id_token else ''
+                    }
                 )
+
+                if not created:
+                    # Update existing token
+                    social_token.token = access_token
+                    social_token.token_secret = id_token if id_token else ''
+                    social_token.save()
 
                 # Log the user in
                 login(info.context, user, backend='allauth.account.auth_backends.AuthenticationBackend')
