@@ -65,3 +65,4 @@ Afyaflow Authentication frontend Workflow.md
 .idea/
 test_security_fixes.py
 SECURITY_CONFIGURATION.md
+SECURITY_IMPLEMENTATION_SUMMARY.md
