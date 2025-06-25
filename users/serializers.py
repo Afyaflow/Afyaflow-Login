@@ -26,8 +26,8 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'email', 'first_name', 'last_name', 'mfa_enabled', 'date_joined', 'last_login')
-        read_only_fields = ('id', 'email', 'date_joined', 'last_login', 'mfa_enabled')
+        fields = ('id', 'email', 'first_name', 'last_name', 'email_verified', 'phone_number', 'phone_number_verified', 'date_joined', 'last_login')
+        read_only_fields = ('id', 'email', 'date_joined', 'last_login', 'email_verified', 'phone_number_verified')
 
 
 class ChangePasswordSerializer(serializers.Serializer):

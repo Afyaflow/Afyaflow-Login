@@ -13,8 +13,9 @@ class UserAdmin(BaseUserAdmin):
     
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
-        (_('Personal info'), {'fields': ('first_name', 'last_name')}),
-        (_('Security'), {'fields': ('mfa_enabled', 'mfa_secret')}),
+        (_('Personal info'), {'fields': ('first_name', 'last_name', 'phone_number')}),
+        (_('Verification'), {'fields': ('email_verified', 'phone_number_verified')}),
+        (_('MFA Settings'), {'fields': ('mfa_totp_secret', 'mfa_totp_setup_complete', 'mfa_email_enabled', 'mfa_sms_enabled')}),
         (_('Status'), {'fields': ('is_suspended', 'suspension_reason')}),
         (_('Permissions'), {
             'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions'),
