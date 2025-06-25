@@ -14,10 +14,11 @@ import logging
 
 from ..types import AuthPayloadType
 from ..services import create_auth_payload
-from users.models import User
+from users.models import User, AuthenticationAttempt
 from ...otp_utils import generate_otp, set_user_otp
 from ...communication_client import send_templated_email, send_sms
 from ...authentication import create_token
+from ..mutations.auth import get_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,10 @@ class BaseSocialAuthMutation(graphene.Mutation):
         Checks if MFA is enabled for the user. If so, initiates the MFA challenge.
         Otherwise, completes the login and returns JWT tokens.
         """
+        # Get client information for security tracking
+        client_ip = get_client_ip(info.context)
+        user_agent = info.context.META.get('HTTP_USER_AGENT', 'Unknown')
+
         enabled_methods = []
         if user.mfa_totp_setup_complete:
             enabled_methods.append("TOTP")
@@ -75,14 +80,44 @@ class BaseSocialAuthMutation(graphene.Mutation):
             enabled_methods.append("SMS")
 
         if not enabled_methods:
-            # No MFA, log in directly
+            # No MFA, record successful attempt and log in directly
+            from ...security_middleware import auth_attempt_tracker
+            from ...models import AuthenticationAttempt
+
+            auth_attempt_tracker.record_attempt(client_ip, True, 'social_login', user.email)
+
+            AuthenticationAttempt.objects.create(
+                email=user.email,
+                attempt_type='social_login',
+                ip_address=client_ip,
+                user_agent=user_agent,
+                success=True,
+                user=user,
+                provider='google'  # This should be dynamic based on provider
+            )
+
             login(info.context, user, backend='allauth.account.auth_backends.AuthenticationBackend')
             auth_data = create_auth_payload(user)
             return cls(auth_payload=AuthPayloadType(**auth_data))
 
         # MFA is enabled, start the challenge
         logger.info(f"MFA required for user {user.email} during social login.")
-        
+
+        # Record partial success (authentication passed, MFA required)
+        from ...security_middleware import auth_attempt_tracker
+
+        AuthenticationAttempt.objects.create(
+            email=user.email,
+            attempt_type='social_login',
+            ip_address=client_ip,
+            user_agent=user_agent,
+            success=False,  # Not fully successful until MFA completed
+            failure_reason='MFA required',
+            user=user,
+            provider='google',  # This should be dynamic
+            metadata={'mfa_methods': enabled_methods}
+        )
+
         otp = None
         # Send OTPs if Email or SMS MFA are enabled.
         if "EMAIL" in enabled_methods or "SMS" in enabled_methods:

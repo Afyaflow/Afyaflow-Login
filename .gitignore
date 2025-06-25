@@ -67,3 +67,5 @@ test_security_fixes.py
 SECURITY_CONFIGURATION.md
 SECURITY_IMPLEMENTATION_SUMMARY.md
 test_graphql_endpoint.py
+SECURITY_VULNERABILITY_REPORT.md
+

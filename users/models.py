@@ -152,3 +152,26 @@ class AuthenticationAttempt(models.Model):
     def __str__(self):
         status = "Success" if self.success else "Failed"
         return f"{status} {self.attempt_type} attempt for {self.email or 'Unknown'} at {self.timestamp}"
+
+
+class BlacklistedToken(models.Model):
+    """Track blacklisted JWT tokens for security purposes."""
+
+    token_jti = models.CharField(max_length=255, unique=True, help_text="JWT ID (jti) claim")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, help_text="User who owned the token")
+    blacklisted_at = models.DateTimeField(auto_now_add=True)
+    reason = models.CharField(max_length=255, help_text="Reason for blacklisting")
+    expires_at = models.DateTimeField(help_text="When the original token would have expired")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['token_jti']),
+            models.Index(fields=['user', 'blacklisted_at']),
+            models.Index(fields=['expires_at']),
+        ]
+        ordering = ['-blacklisted_at']
+        verbose_name = _('blacklisted token')
+        verbose_name_plural = _('blacklisted tokens')
+
+    def __str__(self):
+        return f"Blacklisted token for {self.user.email} - {self.reason}"

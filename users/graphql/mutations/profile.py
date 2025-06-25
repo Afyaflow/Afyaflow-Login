@@ -18,6 +18,16 @@ from graphql import GraphQLError
 
 logger = logging.getLogger(__name__)
 
+
+def _get_client_ip(request):
+    """Get the real client IP address."""
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(',')[0].strip()
+    else:
+        ip = request.META.get('REMOTE_ADDR', '127.0.0.1')
+    return ip
+
 class UpdateProfileMutation(graphene.Mutation):
     """Updates the profile for the authenticated user."""
     class Arguments:
@@ -86,8 +96,10 @@ class ChangePasswordMutation(graphene.Mutation):
         user.set_password(new_password)
         user.save()
 
-        # Revoke all refresh tokens for the user upon password change
-        RefreshToken.objects.filter(user=user).update(is_revoked=True)
+        # Blacklist all JWT tokens and revoke refresh tokens for security
+        from ...authentication import blacklist_user_tokens
+        blacklist_user_tokens(user, "Password changed")
+
         logger.info(f"User {user.email} changed their password successfully.")
 
         return ChangePasswordMutation(ok=True, errors=None)
@@ -105,15 +117,29 @@ class InitiatePasswordResetMutation(graphene.Mutation):
 
     @classmethod
     def mutate(cls, root, info, email_or_phone):
+        # Rate limiting for password reset attempts
+        from ...security_middleware import auth_attempt_tracker
+
+        client_ip = _get_client_ip(info.context)
+
+        # Check if IP is rate limited for password reset
+        if auth_attempt_tracker.is_locked_out(client_ip, 'password_reset'):
+            logger.warning(f"Password reset rate limited for IP: {client_ip}")
+            return cls(ok=False, message="Too many password reset attempts. Please try again later.")
+
         # Determine if the input is an email or a phone number
         is_email = re.match(r"[^@]+@[^@]+\.[^@]+", email_or_phone)
-        
+
         try:
             if is_email:
                 user = User.objects.get(email__iexact=email_or_phone)
             else:
                 user = User.objects.get(phone_number=email_or_phone)
         except User.DoesNotExist:
+            # Record failed attempt for rate limiting
+            auth_attempt_tracker.record_attempt(
+                client_ip, False, 'password_reset', email_or_phone, 'User not found'
+            )
             logger.warning(f"Password reset initiated for non-existent user: {email_or_phone}")
             return cls(ok=True, message="If an account with this email or phone number exists, a password reset code has been sent.")
 
@@ -145,6 +171,11 @@ class InitiatePasswordResetMutation(graphene.Mutation):
                 # Don't send if the phone number isn't verified, but don't reveal that either.
                 logger.warning(f"Password reset attempted for user {user.email} with unverified phone number.")
         
+        # Record successful password reset initiation
+        auth_attempt_tracker.record_attempt(
+            client_ip, True, 'password_reset', user.email, 'OTP sent successfully'
+        )
+
         return cls(ok=True, message="If an account with this email or phone number exists, a password reset code has been sent.")
 
 class ResetPasswordWithOtpMutation(graphene.Mutation):

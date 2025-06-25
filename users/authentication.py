@@ -31,6 +31,13 @@ class JWTAuthentication(authentication.BaseAuthentication):
                 algorithms=[settings.JWT_ALGORITHM]
             )
 
+            # Check if token is blacklisted
+            token_jti = payload.get('jti')
+            if token_jti:
+                from .models import BlacklistedToken
+                if BlacklistedToken.objects.filter(token_jti=token_jti).exists():
+                    raise AuthenticationFailed('Token has been revoked')
+
             # Get user from payload
             user_id = payload.get('sub')
             if user_id is None:
@@ -99,12 +106,17 @@ def create_token(user_id: str, token_type: str = 'access') -> Tuple[str, datetim
     
     expires_at = now + lifetime
     
+    # Generate unique token ID for blacklisting capability
+    import uuid
+    token_jti = str(uuid.uuid4())
+
     # Create the token payload
     payload = {
         'sub': str(user_id),  # subject (user id)
         'type': token_type,
         'iat': now.timestamp(),  # issued at
         'exp': expires_at.timestamp(),  # expiration time
+        'jti': token_jti,  # JWT ID for blacklisting
     }
     
     # Create the token
@@ -141,4 +153,46 @@ def create_oct_token(user_id: str, organization_id: str) -> Tuple[str, datetime]
         algorithm=settings.JWT_ALGORITHM
     )
 
-    return token, expires_at 
+    return token, expires_at
+
+
+def blacklist_user_tokens(user, reason="Security event"):
+    """
+    Blacklist all active JWT tokens for a user.
+    This is used when password changes, account suspension, etc.
+    """
+    from .models import BlacklistedToken, RefreshToken
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    # Get all active refresh tokens for the user
+    refresh_tokens = RefreshToken.objects.filter(
+        user=user,
+        is_revoked=False,
+        expires_at__gt=timezone.now()
+    )
+
+    # Extract JTI from refresh tokens and blacklist them
+    for refresh_token in refresh_tokens:
+        try:
+            # Decode without verification to get JTI
+            payload = jwt.get_unverified_claims(refresh_token.token)
+            token_jti = payload.get('jti')
+
+            if token_jti:
+                BlacklistedToken.objects.get_or_create(
+                    token_jti=token_jti,
+                    defaults={
+                        'user': user,
+                        'reason': reason,
+                        'expires_at': refresh_token.expires_at
+                    }
+                )
+        except Exception as e:
+            logger.warning(f"Failed to blacklist token for user {user.email}: {e}")
+
+    # Revoke all refresh tokens
+    refresh_tokens.update(is_revoked=True)
+
+    logger.info(f"Blacklisted all tokens for user {user.email}. Reason: {reason}")
