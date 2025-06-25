@@ -170,13 +170,19 @@ class SecurityHeadersMiddleware:
         
         # Add CSP for GraphQL endpoint
         if 'graphql' in request.path:
-            response['Content-Security-Policy'] = (
-                "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline'; "
-                "style-src 'self' 'unsafe-inline'; "
-                "img-src 'self' data:; "
-                "connect-src 'self'"
-            )
+            if getattr(settings, 'DEBUG', False):
+                # Skip CSP in development to allow GraphiQL to work properly
+                # GraphiQL needs to load external resources from CDN
+                pass  # No CSP header in development
+            else:
+                # Strict CSP for production
+                response['Content-Security-Policy'] = (
+                    "default-src 'self'; "
+                    "script-src 'self'; "
+                    "style-src 'self'; "
+                    "img-src 'self' data:; "
+                    "connect-src 'self'"
+                )
         
         return response
 

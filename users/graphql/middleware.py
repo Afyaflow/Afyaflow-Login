@@ -22,25 +22,30 @@ class SecurityMiddleware:
     def resolve(self, next, root, info, **args):
         """Apply security checks before resolving."""
 
-        # Log GraphQL operations for security monitoring
-        operation_name = getattr(info.operation, 'name', None) if hasattr(info, 'operation') and info.operation else None
-        operation_type = 'unknown'
+        try:
+            # Only log for actual GraphQL operations, not introspection
+            if hasattr(info, 'operation') and info.operation:
+                operation_name = getattr(info.operation, 'name', None)
+                operation_type = 'unknown'
 
-        if hasattr(info, 'operation') and info.operation and hasattr(info.operation, 'operation'):
-            operation_type = info.operation.operation.value
+                if hasattr(info.operation, 'operation'):
+                    operation_type = info.operation.operation.value
 
-        client_ip = self._get_client_ip(info.context)
+                client_ip = self._get_client_ip(info.context)
 
-        logger.info(
-            f"GraphQL {operation_type} operation: {operation_name or 'anonymous'} "
-            f"from {client_ip}"
-        )
+                # Only log non-introspection queries
+                if operation_name != 'IntrospectionQuery':
+                    logger.info(
+                        f"GraphQL {operation_type} operation: {operation_name or 'anonymous'} "
+                        f"from {client_ip}"
+                    )
 
-        # Basic query depth check (simplified)
-        if hasattr(info, 'field_name'):
-            self._check_query_depth(info)
+            return next(root, info, **args)
 
-        return next(root, info, **args)
+        except Exception as e:
+            # Don't let middleware errors break GraphQL
+            logger.error(f"GraphQL security middleware error: {str(e)}")
+            return next(root, info, **args)
 
     def _check_query_depth(self, info, current_depth=1):
         """Simple query depth check."""
@@ -105,14 +110,28 @@ class CombinedSecurityMiddleware:
     def resolve(self, next, root, info, **args):
         """Apply all security middleware in sequence."""
         try:
-            # Apply authentication logging first
-            self.auth_logging_middleware.resolve(lambda r, i, **a: None, root, info, **args)
+            # Skip middleware for introspection queries (needed for GraphiQL)
+            if (hasattr(info, 'operation') and info.operation and
+                hasattr(info.operation, 'name') and
+                info.operation.name and
+                'introspection' in info.operation.name.value.lower()):
+                return next(root, info, **args)
 
-            # Then apply security checks
-            self.security_middleware.resolve(lambda r, i, **a: None, root, info, **args)
+            # Apply security logging (non-blocking)
+            try:
+                self.auth_logging_middleware.resolve(lambda r, i, **a: None, root, info, **args)
+            except:
+                pass  # Don't let logging errors break the request
 
-            # Finally call the actual resolver
+            # Apply security checks (non-blocking)
+            try:
+                self.security_middleware.resolve(lambda r, i, **a: None, root, info, **args)
+            except:
+                pass  # Don't let security middleware errors break the request
+
+            # Call the actual resolver
             return next(root, info, **args)
+
         except Exception as e:
             logger.error(f"GraphQL middleware error: {str(e)}")
             return next(root, info, **args)

@@ -1,4 +1,5 @@
 import os
+import sys
 import logging
 import dj_database_url
 from pathlib import Path
@@ -24,11 +25,16 @@ if railway_domain:
     print(f"RAILWAY_PUBLIC_DOMAIN is: {railway_domain}")
 
 # Always include common local hosts, railway domain, and any domains from ALLOWED_HOSTS env var
-default_allowed = ['127.0.0.1', 'localhost', '.railway.app']
+default_allowed = ['127.0.0.1', 'localhost', '.railway.app', 'testserver']
 if railway_domain:
     default_allowed.append(railway_domain)
 
 ALLOWED_HOSTS = default_allowed + [host for host in os.getenv('ALLOWED_HOSTS', '').split(',') if host]
+
+# Add testserver for Django test client
+if 'test' in sys.argv or 'pytest' in sys.modules:
+    ALLOWED_HOSTS.append('testserver')
+
 print(f"ALLOWED_HOSTS: {ALLOWED_HOSTS}")
 
 # A list of trusted origins for unsafe requests (e.g., POST).
@@ -164,10 +170,13 @@ STORAGES = {
 # Graphene-Django settings with security enhancements
 GRAPHENE = {
     'SCHEMA': 'afyaflow_auth.schema.schema',  # Path to your main GraphQL schema
-    'MIDDLEWARE': [
-        'users.graphql.middleware.CombinedSecurityMiddleware',
-    ],
 }
+
+# Add security middleware only in production or when explicitly enabled
+if not DEBUG or os.getenv('ENABLE_GRAPHQL_SECURITY_MIDDLEWARE', 'False').lower() in ('true', '1', 't'):
+    GRAPHENE['MIDDLEWARE'] = [
+        'users.graphql.middleware.CombinedSecurityMiddleware',
+    ]
 
 # GraphQL Security Settings
 GRAPHQL_MAX_QUERY_DEPTH = int(os.getenv('GRAPHQL_MAX_QUERY_DEPTH', '10'))
@@ -244,6 +253,21 @@ JWT_MFA_TOKEN_LIFETIME = 5 # minutes, for the two-step login flow
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only for development
 cors_origins_str = os.getenv('CORS_ALLOWED_ORIGINS', '')
 CORS_ALLOWED_ORIGINS = [origin for origin in cors_origins_str.split(',') if origin] if not DEBUG else []
+
+# Additional CORS settings for GraphiQL in development
+if DEBUG:
+    CORS_ALLOW_CREDENTIALS = True
+    CORS_ALLOWED_HEADERS = [
+        'accept',
+        'accept-encoding',
+        'authorization',
+        'content-type',
+        'dnt',
+        'origin',
+        'user-agent',
+        'x-csrftoken',
+        'x-requested-with',
+    ]
 
 # Organization Service settings
 ORGANIZATION_SERVICE_URL = os.getenv('ORGANIZATION_SERVICE_URL')
