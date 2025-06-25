@@ -369,6 +369,7 @@ class VerifyPhoneNumberMutation(graphene.Mutation):
         otp_code = graphene.String(required=True)
 
     ok = graphene.Boolean()
+    user = graphene.Field(UserType)
     errors = graphene.List(graphene.String)
 
     @classmethod
@@ -379,7 +380,7 @@ class VerifyPhoneNumberMutation(graphene.Mutation):
 
         if not user.mfa_otp or not user.mfa_otp_expires_at:
             return cls(ok=False, errors=["No OTP verification is currently pending."])
-        
+
         if timezone.now() > user.mfa_otp_expires_at:
             return cls(ok=False, errors=["The OTP code has expired."])
 
@@ -390,7 +391,144 @@ class VerifyPhoneNumberMutation(graphene.Mutation):
         user.phone_number_verified = True
         user.mfa_otp = None
         user.mfa_otp_expires_at = None
-        user.save(update_fields=['phone_number_verified', 'mfa_otp', 'mfa_otp_expires_at'])
+        user.mfa_otp_purpose = None
+        user.save(update_fields=['phone_number_verified', 'mfa_otp', 'mfa_otp_expires_at', 'mfa_otp_purpose'])
 
         logger.info(f"Phone number successfully verified for user {user.email}.")
-        return cls(ok=True)
+        return cls(ok=True, user=user)
+
+
+class UpdatePhoneNumberMutation(graphene.Mutation):
+    """Updates a user's phone number and sends a verification OTP to the new number."""
+    class Arguments:
+        phone_number = graphene.String(required=True)
+
+    ok = graphene.Boolean()
+    message = graphene.String()
+    errors = graphene.List(graphene.String)
+
+    @classmethod
+    def mutate(cls, root, info, phone_number):
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("You must be logged in to update your phone number.")
+
+        # Basic validation
+        if not phone_number or not phone_number.startswith('+'):
+            return cls(ok=False, errors=["Invalid phone number format. Please use E.164 format (e.g., +12125552368)."])
+
+        # Check if another user already has this number verified
+        if User.objects.filter(phone_number=phone_number, phone_number_verified=True).exclude(pk=user.pk).exists():
+            return cls(ok=False, errors=["This phone number is already in use by another account."])
+
+        # If user is changing to the same number they already have verified, no need to re-verify
+        if user.phone_number == phone_number and user.phone_number_verified:
+            return cls(ok=True, message="This phone number is already verified for your account.")
+
+        # Disable SMS MFA if it was enabled with the old number
+        if user.mfa_sms_enabled and user.phone_number != phone_number:
+            user.mfa_sms_enabled = False
+            logger.info(f"SMS MFA disabled for user {user.email} due to phone number change.")
+
+        # Update phone number and mark as unverified
+        user.phone_number = phone_number
+        user.phone_number_verified = False
+
+        # Generate and send OTP
+        otp = generate_otp()
+        set_user_otp(user, otp, purpose='phone_verification')
+        user.save(update_fields=['phone_number', 'phone_number_verified', 'mfa_sms_enabled'])
+
+        # Send the OTP via SMS
+        message = f"Your AfyaFlow verification code is: {otp}"
+        sms_sent = send_sms(recipient=phone_number, message=message)
+
+        if not sms_sent:
+            logger.error(f"Failed to send SMS OTP to {phone_number} for user {user.email}.")
+            return cls(ok=False, errors=["Failed to send verification SMS. Please try again later."])
+
+        logger.info(f"Phone number updated and verification OTP sent to {phone_number} for user {user.email}.")
+        return cls(ok=True, message="Phone number updated. A verification code has been sent to your new number.")
+
+
+class RemovePhoneNumberMutation(graphene.Mutation):
+    """Removes a user's phone number and disables SMS MFA."""
+    class Arguments:
+        password = graphene.String(required=True)
+
+    ok = graphene.Boolean()
+    user = graphene.Field(UserType)
+    errors = graphene.List(graphene.String)
+
+    @classmethod
+    def mutate(cls, root, info, password):
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("You must be logged in to remove your phone number.")
+
+        # Verify password for security
+        if not user.check_password(password):
+            return cls(ok=False, errors=["Incorrect password."])
+
+        if not user.phone_number:
+            return cls(ok=False, errors=["No phone number is currently associated with your account."])
+
+        # Disable SMS MFA if enabled
+        if user.mfa_sms_enabled:
+            user.mfa_sms_enabled = False
+            logger.info(f"SMS MFA disabled for user {user.email} due to phone number removal.")
+
+        # Remove phone number and verification status
+        old_phone = user.phone_number
+        user.phone_number = None
+        user.phone_number_verified = False
+
+        # Clear any pending phone verification OTP
+        if user.mfa_otp_purpose == 'phone_verification':
+            user.mfa_otp = None
+            user.mfa_otp_expires_at = None
+            user.mfa_otp_purpose = None
+
+        user.save(update_fields=['phone_number', 'phone_number_verified', 'mfa_sms_enabled',
+                                'mfa_otp', 'mfa_otp_expires_at', 'mfa_otp_purpose'])
+
+        logger.info(f"Phone number {old_phone} removed from user {user.email}.")
+        return cls(ok=True, user=user)
+
+
+class ResendPhoneVerificationMutation(graphene.Mutation):
+    """Resends the phone verification OTP to the user's current phone number."""
+    class Arguments:
+        pass
+
+    ok = graphene.Boolean()
+    message = graphene.String()
+    errors = graphene.List(graphene.String)
+
+    @classmethod
+    def mutate(cls, root, info):
+        user = info.context.user
+        if not user.is_authenticated:
+            raise GraphQLError("You must be logged in to resend phone verification.")
+
+        if not user.phone_number:
+            return cls(ok=False, errors=["No phone number is associated with your account."])
+
+        if user.phone_number_verified:
+            return cls(ok=False, errors=["Your phone number is already verified."])
+
+        # Generate and send new OTP
+        otp = generate_otp()
+        set_user_otp(user, otp, purpose='phone_verification')
+        user.save()
+
+        # Send the OTP via SMS
+        message = f"Your AfyaFlow verification code is: {otp}"
+        sms_sent = send_sms(recipient=user.phone_number, message=message)
+
+        if not sms_sent:
+            logger.error(f"Failed to resend SMS OTP to {user.phone_number} for user {user.email}.")
+            return cls(ok=False, errors=["Failed to send verification SMS. Please try again later."])
+
+        logger.info(f"Phone verification OTP resent to {user.phone_number} for user {user.email}.")
+        return cls(ok=True, message="A new verification code has been sent to your phone.")

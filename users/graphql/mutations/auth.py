@@ -23,15 +23,15 @@ class RegisterMutation(graphene.Mutation):
         email = graphene.String(required=True)
         password = graphene.String(required=True)
         password_confirm = graphene.String(required=True)
-        first_name = graphene.String()
-        last_name = graphene.String()
+        first_name = graphene.String(required=True)
+        last_name = graphene.String(required=True)
 
     auth_payload = graphene.Field(AuthPayloadType)
     errors = graphene.List(graphene.String)
 
     @classmethod
     @transaction.atomic
-    def mutate(cls, root, info, email, password, password_confirm, first_name=None, last_name=None):
+    def mutate(cls, root, info, email, password, password_confirm, first_name, last_name):
         serializer = UserRegistrationSerializer(data={
             'email': email,
             'password': password,
@@ -46,7 +46,16 @@ class RegisterMutation(graphene.Mutation):
             return RegisterMutation(auth_payload=None, errors=errors)
         
         user = serializer.save()
-        
+
+        # Create EmailAddress record for allauth consistency
+        from allauth.account.models import EmailAddress
+        EmailAddress.objects.create(
+            user=user,
+            email=user.email,
+            primary=True,
+            verified=False  # Will be verified when user completes email verification
+        )
+
         # Send a verification OTP to the user's email
         try:
             otp = generate_otp()

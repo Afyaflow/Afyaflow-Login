@@ -32,11 +32,27 @@ class VerifyEmailMutation(graphene.Mutation):
 
         if not verify_otp(otp_code, user, purpose='email_verification'):
              return cls(auth_payload=None, errors=["Invalid or expired OTP."])
-        
+
         user.email_verified = True
         user.mfa_otp = None
         user.mfa_otp_expires_at = None
-        user.save(update_fields=['email_verified', 'mfa_otp', 'mfa_otp_expires_at'])
+        user.mfa_otp_purpose = None
+        user.save(update_fields=['email_verified', 'mfa_otp', 'mfa_otp_expires_at', 'mfa_otp_purpose'])
+
+        # Also update the allauth EmailAddress model for consistency
+        from allauth.account.models import EmailAddress
+        try:
+            email_address = EmailAddress.objects.get(user=user, email=user.email)
+            email_address.verified = True
+            email_address.save(update_fields=['verified'])
+        except EmailAddress.DoesNotExist:
+            # Create it if it doesn't exist (shouldn't happen, but safety net)
+            EmailAddress.objects.create(
+                user=user,
+                email=user.email,
+                primary=True,
+                verified=True
+            )
 
         logger.info(f"Email address successfully verified for user {user.email}.")
 

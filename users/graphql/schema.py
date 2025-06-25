@@ -33,6 +33,9 @@ from .mutations.mfa import (
     DisableSmsMfaMutation,
     AddPhoneNumberMutation,
     VerifyPhoneNumberMutation,
+    UpdatePhoneNumberMutation,
+    RemovePhoneNumberMutation,
+    ResendPhoneVerificationMutation,
 )
 from .mutations.verification import (
     VerifyEmailMutation,
@@ -85,6 +88,9 @@ class UserMutation(graphene.ObjectType):
     # Phone Management
     add_phone_number = AddPhoneNumberMutation.Field(description="Adds a phone number and sends a verification code.")
     verify_phone_number = VerifyPhoneNumberMutation.Field(description="Verifies the OTP sent to a phone number.")
+    update_phone_number = UpdatePhoneNumberMutation.Field(description="Updates the user's phone number and sends a verification code.")
+    remove_phone_number = RemovePhoneNumberMutation.Field(description="Removes the user's phone number and disables SMS MFA.")
+    resend_phone_verification = ResendPhoneVerificationMutation.Field(description="Resends the phone verification OTP.")
 
 
 # Build the federated schema
