@@ -1,177 +1,354 @@
 # AfyaFlow Auth Service
 
-## Overview
+A comprehensive authentication and user management service built with Django and GraphQL, providing secure user registration, multi-factor authentication, social login, and complete profile management.
 
-The AfyaFlow Auth Service is a centralized, standalone Django application responsible for all user authentication, authorization, and management within the AfyaFlow ecosystem. It exposes a federated GraphQL API for seamless integration with other services, including the frontend application and the Organizations service.
+## 🚀 Features
 
----
+### Core Authentication
+- **Email/Password Registration & Login** with email verification
+- **Social Authentication** (Google, Microsoft, LinkedIn)
+- **JWT Token Management** (Access tokens, Refresh tokens, Organization-scoped tokens)
+- **Password Reset** with OTP verification
 
-## Core Features
+### Multi-Factor Authentication (MFA)
+- **TOTP (Time-based OTP)** - Compatible with Google Authenticator, Authy, 1Password
+- **SMS MFA** - Send verification codes via SMS
+- **Email MFA** - Send verification codes via email
+- **Flexible MFA Setup** - Users can enable multiple MFA methods
 
--   **User Accounts:** Standard email/password registration and login.
--   **Secure Password Management:** Robust, OTP-based password reset flow and secure password change functionality.
--   **Multi-Factor Authentication (MFA):** Supports a consistent `initiate` -> `verify` -> `disable` flow for multiple MFA methods:
-    -   TOTP (Authenticator Apps like Google Authenticator)
-    -   Email OTP
-    -   SMS OTP
--   **Contact Verification:** Flows for verifying user email addresses and phone numbers.
--   **Social Login:** Secure login and registration via major providers, fully integrated with the MFA system. Powered by `django-allauth`.
-    -   Google
-    -   Microsoft
-    -   LinkedIn
--   **Federated Authorization:** Issues Organization Context Tokens (OCTs) for role-based access control in other services.
+### Phone Number Management
+- **Add & Verify Phone Numbers** - Complete phone number lifecycle management
+- **Update Phone Numbers** - Change phone numbers with automatic re-verification
+- **Remove Phone Numbers** - Secure removal with password confirmation
+- **SMS Integration** - Phone numbers required for SMS MFA
 
----
+### Profile Management
+- **Update Profile Information** - Change names and personal details (firstName/lastName required)
+- **Password Management** - Secure password changes
+- **Account Status** - Email and phone verification status
+- **MFA Status** - View and manage enabled MFA methods
 
-## Local Development Setup
+## 🏗️ Architecture
+
+### Technology Stack
+- **Backend**: Django 5.2+ with Python 3.9+
+- **API**: GraphQL with Graphene-Django
+- **Database**: PostgreSQL (configurable)
+- **Authentication**: JWT tokens with refresh mechanism
+- **Social Auth**: Django Allauth integration
+- **Communication**: Email and SMS services
+
+### Key Components
+- **User Model**: Extended Django user with MFA and verification fields
+- **GraphQL API**: Complete mutation and query interface
+- **OTP System**: Secure one-time password generation and verification
+- **Token Management**: JWT access and refresh token handling
+- **Communication Client**: Email and SMS delivery services
+
+## 🚦 Quick Start
 
 ### Prerequisites
+- Python 3.9+
+- PostgreSQL (or SQLite for development)
+- Redis (for caching, optional)
 
--   Python 3.11+
--   A Python virtual environment tool (e.g., `venv`)
--   A running PostgreSQL instance
+### Installation
 
-### 1. Installation
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd auth-service
+   ```
+
+2. **Create virtual environment**
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+3. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Environment Configuration**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
+
+5. **Database Setup**
+   ```bash
+   python manage.py migrate
+   python manage.py createsuperuser
+   ```
+
+6. **Run Development Server**
+   ```bash
+   python manage.py runserver
+   ```
+
+7. **Access GraphQL Interface**
+   - GraphiQL: http://localhost:8000/graphql
+   - Admin: http://localhost:8000/admin
+
+## ⚙️ Configuration
+
+### Environment Variables
 
 ```bash
-# Clone the repository
-git clone <repository_url>
-cd auth-service
+# Database
+DATABASE_URL=postgresql://user:password@localhost:5432/afyaflow_auth
+# or for SQLite: DATABASE_URL=sqlite:///db.sqlite3
 
-# Create and activate a virtual environment
-python -m venv venv
-# On Windows
-# .\\venv\\Scripts\\activate
-# On macOS/Linux
-source venv/bin/activate
+# Security
+SECRET_KEY=your-secret-key-here
+DEBUG=True  # Set to False in production
+ALLOWED_HOSTS=localhost,127.0.0.1
 
-# Install dependencies
-pip install -r requirements.txt
+# JWT Configuration
+JWT_ACCESS_TOKEN_LIFETIME=30  # minutes
+JWT_REFRESH_TOKEN_LIFETIME=7  # days
+
+# Email Configuration
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USE_TLS=True
+EMAIL_HOST_USER=your-email@gmail.com
+EMAIL_HOST_PASSWORD=your-app-password
+
+# SMS Configuration (Twilio example)
+TWILIO_ACCOUNT_SID=your-twilio-sid
+TWILIO_AUTH_TOKEN=your-twilio-token
+TWILIO_PHONE_NUMBER=+1234567890
+
+# Social Authentication
+GOOGLE_OAUTH2_CLIENT_ID=your-google-client-id
+GOOGLE_OAUTH2_CLIENT_SECRET=your-google-client-secret
+
+MICROSOFT_CLIENT_ID=your-microsoft-client-id
+MICROSOFT_CLIENT_SECRET=your-microsoft-client-secret
+
+LINKEDIN_CLIENT_ID=your-linkedin-client-id
+LINKEDIN_CLIENT_SECRET=your-linkedin-client-secret
+
+# Organization Service (if using microservices)
+ORGANIZATION_SERVICE_URL=http://localhost:8001
+INTERNAL_SERVICE_TOKEN=your-internal-service-token
 ```
 
-### 2. Configuration
+### Social Authentication Setup
 
-This project uses environment variables for configuration. Create a `.env` file in the project root. 
+#### Google OAuth2
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select existing
+3. Enable Google+ API
+4. Create OAuth2 credentials
+5. Add authorized redirect URIs
 
-Key variables to configure:
--   `SECRET_KEY`: Your Django secret key.
--   `DATABASE_URL`: The connection string for your PostgreSQL database (e.g., `postgres://user:password@localhost:5432/afyaflow_auth_db`).
--   `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, etc.: Credentials for your SMTP service for sending emails.
--   `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_SECRET`: Credentials for Google social login.
--   `MICROSOFT_GRAPH_CLIENT_ID`, `MICROSOFT_GRAPH_SECRET`: Credentials for Microsoft social login.
--   `LINKEDIN_OAUTH2_CLIENT_ID`, `LINKEDIN_OAUTH2_SECRET`: Credentials for LinkedIn social login.
+#### Microsoft OAuth2
+1. Go to [Azure Portal](https://portal.azure.com/)
+2. Register a new application
+3. Configure authentication settings
+4. Add redirect URIs
 
-### 3. Database Setup
+#### LinkedIn OAuth2
+1. Go to [LinkedIn Developer Portal](https://developer.linkedin.com/)
+2. Create a new application
+3. Configure OAuth2 settings
+4. Add authorized redirect URLs
 
-Ensure your PostgreSQL server is running and you have created a database for the service.
+## 📚 API Usage
 
+### GraphQL Endpoint
+- **URL**: `/graphql`
+- **Method**: POST
+- **Content-Type**: application/json
+
+### Authentication
+Include JWT token in Authorization header:
+```
+Authorization: Bearer <your-access-token>
+```
+
+### Key API Features
+
+#### User Registration (firstName/lastName Required)
+```graphql
+mutation {
+  register(
+    email: "user@example.com"
+    password: "SecurePassword123!"
+    passwordConfirm: "SecurePassword123!"
+    firstName: "John"    # Required
+    lastName: "Doe"      # Required
+  ) {
+    authPayload {
+      user { id email firstName lastName emailVerified }
+      accessToken
+      refreshToken
+    }
+    errors
+  }
+}
+```
+
+#### Complete Phone Number Management
+```graphql
+# Add phone number
+mutation {
+  addPhoneNumber(phoneNumber: "+1234567890") {
+    ok
+    message
+    errors
+  }
+}
+
+# Update phone number
+mutation {
+  updatePhoneNumber(phoneNumber: "+1987654321") {
+    ok
+    message
+    errors
+  }
+}
+
+# Remove phone number (requires password)
+mutation {
+  removePhoneNumber(password: "current_password") {
+    ok
+    user { phoneNumber smsMfaEnabled }
+    errors
+  }
+}
+```
+
+#### Multi-Factor Authentication
+```graphql
+# Setup TOTP MFA
+mutation {
+  initiateTotpSetup {
+    qrCodeImage  # Base64 encoded QR code
+    mfaSecret    # Manual entry secret
+    errors
+  }
+}
+
+# Enable SMS MFA (requires verified phone)
+mutation {
+  initiateSmsMfaSetup {
+    ok
+    message
+  }
+}
+```
+
+## 🧪 Testing
+
+### Run Tests
 ```bash
-# Apply the database schema
-python manage.py migrate
+# Run all tests
+python manage.py test
+
+# Run specific test module
+python manage.py test users.tests.test_models
+
+# Run with coverage
+coverage run --source='.' manage.py test
+coverage report
+coverage html  # Generate HTML report
 ```
 
-### 4. Running the Server
+### Test Categories
+- **Model Tests**: User model and relationships
+- **GraphQL Tests**: Mutation and query functionality
+- **Authentication Tests**: Login, registration, MFA flows
+- **Integration Tests**: End-to-end user journeys
 
-```bash
-# Start the local development server
-python manage.py runserver
+## 🚀 Deployment
+
+### Production Checklist
+- [ ] Set `DEBUG=False`
+- [ ] Configure production database
+- [ ] Set up proper email service
+- [ ] Configure SMS service
+- [ ] Set up social auth credentials
+- [ ] Configure HTTPS
+- [ ] Set up monitoring and logging
+- [ ] Configure backup strategy
+
+### Docker Deployment
+```dockerfile
+# Dockerfile example
+FROM python:3.9-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY . .
+RUN python manage.py collectstatic --noinput
+
+EXPOSE 8000
+CMD ["gunicorn", "afyaflow_auth.wsgi:application", "--bind", "0.0.0.0:8000"]
 ```
-The GraphQL API will be available at `http://127.0.0.1:8000/graphql`.
 
----
+### Environment-Specific Settings
+- **Development**: SQLite, debug mode, local email backend
+- **Staging**: PostgreSQL, debug off, real email/SMS services
+- **Production**: PostgreSQL, all security features, monitoring
 
-## GraphQL API Reference
+## 📖 Documentation
 
-### User Authentication & Registration
+- **[API Documentation](authServiceApiDocumentation.md)** - Complete GraphQL API reference
+- **[Architecture Guide](docs/architecture.md)** - System design and components
+- **[Security Guide](docs/security.md)** - Security best practices
+- **[Deployment Guide](docs/deployment.md)** - Production deployment instructions
 
-#### `register`
-Creates a new user account. On success, it sends a verification OTP to the user's email.
--   **Arguments:** `email`, `password`, `passwordConfirm`, `firstName`, `lastName`
--   **Returns:** `AuthPayloadType` with tokens and `user.emailVerified: false`.
+## 🤝 Contributing
 
-#### `login`
-Logs a user in.
--   **Arguments:** `email`, `password`
--   **Returns:** `AuthPayloadType`.
-    -   **If no MFA:** Returns user object and access/refresh tokens.
-    -   **If MFA is enabled:** Returns user object, `mfaRequired: true`, `mfaToken`, and `enabledMfaMethods`. Tokens are `null`.
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-#### `verifyMfa`
-Completes the second step of an MFA login.
--   **Arguments:** `mfaToken` (from `login` response), `otpCode`
--   **Returns:** `AuthPayloadType` with tokens.
+### Development Guidelines
+- Follow PEP 8 style guidelines
+- Write tests for new features
+- Update documentation
+- Use meaningful commit messages
 
-#### `loginWithGoogle`
-Logs in or registers a user with their Google account.
--   **Arguments:** `accessToken` (from Google Sign-In SDK)
--   **Returns:** `AuthPayloadType` (may require MFA verification).
+## Support
 
-#### `loginWithMicrosoft`
-Logs in or registers a user with their Microsoft account.
--   **Arguments:** `accessToken` (from MSAL)
--   **Returns:** `AuthPayloadType` (may require MFA verification).
+- **Documentation**: Check the docs folder for detailed guides
+- **Issues**: Report bugs and request features via GitHub Issues
+- **API Reference**: Use GraphiQL interface for interactive API exploration
+- **Email Verification**: Consistent handling across all authentication methods
+- **Phone Management**: Complete lifecycle with security features
 
-#### `loginWithLinkedin`
-Logs in or registers a user with their LinkedIn account.
--   **Arguments:** `accessToken` (from LinkedIn OAuth flow)
--   **Returns:** `AuthPayloadType` (may require MFA verification).
 
-#### `refreshToken`
-Issues a new access token.
--   **Arguments:** `refreshToken`
--   **Returns:** A new `accessToken`.
+## 🔧 Key Features Highlights
 
-#### `logout`
-Invalidates the user's refresh token.
--   **Arguments:** `refreshToken`
+### Security Features
+- **Required Names**: firstName and lastName mandatory for all registrations
+- **Email Verification Consistency**: Synchronized between User and EmailAddress models
+- **Phone Number Security**: Password-protected removal, format validation
+- **MFA Integration**: Automatic SMS MFA management during phone changes
+- **Token Security**: JWT with refresh mechanism and organization scoping
 
-### Password Management
+### User Experience
+- **Seamless Phone Updates**: Change numbers without losing account access
+- **Multiple MFA Options**: TOTP, SMS, and Email MFA support
+- **Clear Error Messages**: Comprehensive validation and user feedback
+- **Social Login Integration**: Automatic email verification for social accounts
+- **Profile Management**: Easy name and contact information updates
 
-#### `changePassword`
-Allows a logged-in user to change their password.
--   **Arguments:** `oldPassword`, `newPassword`, `newPasswordConfirm`
+### Developer Experience
+- **GraphQL API**: Complete, well-documented API with GraphiQL interface
+- **Comprehensive Testing**: Model, GraphQL, and integration tests
+- **Easy Configuration**: Environment-based configuration
+- **Docker Ready**: Production-ready containerization
+- **Extensible**: Modular design for easy feature additions
 
-#### Forgot Password Flow (2 Steps)
-
-1.  **`initiatePasswordReset`**
-    -   Sends a 6-digit OTP to the user's specified contact channel.
-    -   **Arguments:** `emailOrPhone` (can be an email address or a phone number).
-2.  **`resetPasswordWithOtp`**
-    -   Verifies the OTP and sets the new password.
-    -   **Arguments:** `emailOrPhone` (from Step 1), `otpCode`, `newPassword`, `newPasswordConfirm`
-
-### Email & Phone Verification
-
-#### `resendVerificationEmail`
-Sends a new verification OTP to the logged-in user's email.
-
-#### `verifyEmail`
-Verifies the OTP to mark the user's email as verified.
--   **Arguments:** `otpCode`
-
-#### `addPhoneNumber`
-Adds a phone number to a user's account and sends a verification OTP via SMS.
--   **Arguments:** `phoneNumber` (must be in E.164 format, e.g., `+254790787787`).
-
-#### `verifyPhoneNumber`
-Verifies the OTP to mark the user's phone number as verified.
--   **Arguments:** `otpCode`
-
-### Multi-Factor Authentication (MFA) Management
-
-All MFA methods follow a consistent `initiate` -> `verify` -> `disable` flow.
-
-#### TOTP (Authenticator App)
-1.  **`initiateTotpSetup`**: Returns a provisioning URI and a Base64 QR code image for the user to scan.
-2.  **`verifyTotpSetup`**: Confirms the setup by validating an OTP from the app. (Arg: `otpCode`)
-3.  **`disableTotp`**: Disables TOTP by validating a final OTP from the app. (Arg: `otpCode`)
-
-#### Email MFA
-1.  **`initiateEmailMfaSetup`**: Sends an OTP to the user's verified email.
-2.  **`verifyEmailMfaSetup`**: Validates the OTP to enable Email MFA. (Arg: `otpCode`)
-3.  **`disableEmailMfa`**: Disables Email MFA after validating the user's current password. (Arg: `password`)
-
-#### SMS MFA
-1.  **`initiateSmsMfaSetup`**: Sends an OTP to the user's verified phone number.
-2.  **`verifySmsMfaSetup`**: Validates the OTP to enable SMS MFA. (Arg: `otpCode`)
-3.  **`disableSmsMfa`**: Disables SMS MFA after validating the user's current password. (Arg: `password`)
