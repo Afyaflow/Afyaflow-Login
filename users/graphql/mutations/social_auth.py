@@ -60,15 +60,24 @@ class BaseSocialAuthMutation(graphene.Mutation):
             raise Exception(f"Error getting social app configuration: {str(e)}")
 
     @classmethod
-    def _handle_login_or_mfa(cls, info, user):
+    def _handle_login_or_mfa(cls, info, user, provider='unknown'):
         """
         Shared logic to handle post-authentication flow.
         Checks if MFA is enabled for the user. If so, initiates the MFA challenge.
         Otherwise, completes the login and returns JWT tokens.
+
+        Args:
+            info: GraphQL info object
+            user: User object
+            provider: Social auth provider name (e.g., 'google', 'microsoft', 'linkedin')
         """
         # Get client information for security tracking
         client_ip = get_client_ip(info.context)
         user_agent = info.context.META.get('HTTP_USER_AGENT', 'Unknown')
+
+        # Import required modules at the beginning
+        from ...security_middleware import auth_attempt_tracker
+        from ...models import AuthenticationAttempt
 
         enabled_methods = []
         if user.mfa_totp_setup_complete:
@@ -81,9 +90,6 @@ class BaseSocialAuthMutation(graphene.Mutation):
 
         if not enabled_methods:
             # No MFA, record successful attempt and log in directly
-            from ...security_middleware import auth_attempt_tracker
-            from ...models import AuthenticationAttempt
-
             auth_attempt_tracker.record_attempt(client_ip, True, 'social_login', user.email)
 
             AuthenticationAttempt.objects.create(
@@ -93,7 +99,7 @@ class BaseSocialAuthMutation(graphene.Mutation):
                 user_agent=user_agent,
                 success=True,
                 user=user,
-                provider='google'  # This should be dynamic based on provider
+                provider=provider
             )
 
             login(info.context, user, backend='allauth.account.auth_backends.AuthenticationBackend')
@@ -104,8 +110,6 @@ class BaseSocialAuthMutation(graphene.Mutation):
         logger.info(f"MFA required for user {user.email} during social login.")
 
         # Record partial success (authentication passed, MFA required)
-        from ...security_middleware import auth_attempt_tracker
-
         AuthenticationAttempt.objects.create(
             email=user.email,
             attempt_type='social_login',
@@ -114,7 +118,7 @@ class BaseSocialAuthMutation(graphene.Mutation):
             success=False,  # Not fully successful until MFA completed
             failure_reason='MFA required',
             user=user,
-            provider='google',  # This should be dynamic
+            provider=provider,
             metadata={'mfa_methods': enabled_methods}
         )
 
@@ -240,7 +244,7 @@ class GoogleLoginMutation(BaseSocialAuthMutation):
                     social_token.save()
 
                 # Hand off to the MFA check or final login flow
-                return cls._handle_login_or_mfa(info, user)
+                return cls._handle_login_or_mfa(info, user, provider='google')
 
         except Exception as e:
             logger.error(f"Google authentication error: {str(e)}")
@@ -333,7 +337,7 @@ class MicrosoftLoginMutation(BaseSocialAuthMutation):
                     social_token.save()
 
                 # Hand off to the MFA check or final login flow
-                return cls._handle_login_or_mfa(info, user)
+                return cls._handle_login_or_mfa(info, user, provider='microsoft')
 
         except Exception as e:
             logger.error(f"Microsoft authentication error: {str(e)}")
@@ -425,7 +429,7 @@ class LinkedInLoginMutation(BaseSocialAuthMutation):
                     social_token.token = access_token
                     social_token.save()
 
-                return cls._handle_login_or_mfa(info, user)
+                return cls._handle_login_or_mfa(info, user, provider='linkedin')
 
         except Exception as e:
             logger.error(f"LinkedIn authentication error: {str(e)}")
