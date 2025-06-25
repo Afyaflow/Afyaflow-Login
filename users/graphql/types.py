@@ -4,7 +4,7 @@ from ..models import User
 
 class UserType(DjangoObjectType):
     """GraphQL type for the User model, representing a healthcare professional or system user."""
-    totp_setup = graphene.Boolean(source='mfa_totp_setup_complete', description="True if TOTP is configured and verified.")
+    totp_mfa_enabled = graphene.Boolean(source='mfa_totp_setup_complete', description="True if TOTP MFA is configured and verified.")
     sms_mfa_enabled = graphene.Boolean(source='mfa_sms_enabled', description="True if SMS MFA is enabled.")
     email_mfa_enabled = graphene.Boolean(source='mfa_email_enabled', description="True if Email MFA is enabled.")
 

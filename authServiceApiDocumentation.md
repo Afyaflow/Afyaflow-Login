@@ -329,9 +329,11 @@ Verifies the OTP code and enables MFA for the authenticated user. Requires authe
         user {
           id
           email
-          mfaEnabled
+          totpMfaEnabled
+          smsMfaEnabled
+          emailMfaEnabled
         }
-        
+
       }
     }
     ```
