@@ -1,11 +1,11 @@
 from django.utils import timezone
 from datetime import timedelta
-import random
+import secrets
 from django.contrib.auth.hashers import make_password, check_password
 
 def generate_otp(length: int = 6) -> str:
-    """Generates a simple numeric OTP."""
-    return "".join(str(random.randint(0, 9)) for _ in range(length))
+    """Generates a cryptographically secure numeric OTP."""
+    return "".join(str(secrets.randbelow(10)) for _ in range(length))
 
 def hash_otp(otp: str) -> str:
     """Hashes the OTP before saving."""

@@ -1,7 +1,10 @@
 import os
+import logging
 import dj_database_url
 from pathlib import Path
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -75,6 +78,8 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
+    'users.security_middleware.RateLimitMiddleware',
+    'users.security_middleware.SecurityHeadersMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -156,10 +161,17 @@ STORAGES = {
     },
 }
 
-# Graphene-Django settings
+# Graphene-Django settings with security enhancements
 GRAPHENE = {
-    'SCHEMA': 'afyaflow_auth.schema.schema'  # Path to your main GraphQL schema
+    'SCHEMA': 'afyaflow_auth.schema.schema',  # Path to your main GraphQL schema
+    'MIDDLEWARE': [
+        'users.graphql.middleware.CombinedSecurityMiddleware',
+    ],
 }
+
+# GraphQL Security Settings
+GRAPHQL_MAX_QUERY_DEPTH = int(os.getenv('GRAPHQL_MAX_QUERY_DEPTH', '10'))
+GRAPHQL_MAX_QUERY_COMPLEXITY = int(os.getenv('GRAPHQL_MAX_QUERY_COMPLEXITY', '1000'))
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -254,3 +266,21 @@ CSRF_COOKIE_SAMESITE = 'Lax'
 # Trust the "X-Forwarded-Proto" header from the reverse proxy (Railway)
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 USE_X_FORWARDED_HOST = True
+
+# Security Configuration
+MAX_AUTH_ATTEMPTS_PER_IP = int(os.getenv('MAX_AUTH_ATTEMPTS_PER_IP', '10'))
+AUTH_LOCKOUT_DURATION_MINUTES = int(os.getenv('AUTH_LOCKOUT_DURATION_MINUTES', '15'))
+ENABLE_AUTHENTICATION_LOGGING = os.getenv('ENABLE_AUTHENTICATION_LOGGING', 'True').lower() in ('true', '1', 't')
+
+# JWT Security - Ensure separate secret key
+JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY')
+if not JWT_SECRET_KEY:
+    import secrets
+    JWT_SECRET_KEY = secrets.token_urlsafe(64)
+    logger.warning("JWT_SECRET_KEY not set in environment. Generated temporary key. Set JWT_SECRET_KEY for production!")
+
+# Session Security Enhancement
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Strict' if not DEBUG else 'Lax'
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = 'Strict' if not DEBUG else 'Lax'

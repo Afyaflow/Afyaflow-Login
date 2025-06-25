@@ -8,14 +8,25 @@ from graphql import GraphQLError
 
 from ..types import AuthPayloadType, OrganizationStub, MfaChallengeType, LoginPayload, ScopedAuthPayload, GetScopedAccessTokenPayload
 from ..services import create_auth_payload, get_user_organization_memberships
-from ...models import RefreshToken, User
+from ...models import RefreshToken, User, AuthenticationAttempt
 from ...serializers import UserRegistrationSerializer
 from ...authentication import create_token, JWTAuthentication, create_oct_token
 from ...communication_client import send_templated_email, send_sms
 from ...otp_utils import generate_otp, set_user_otp, verify_otp
+from ...security_middleware import auth_attempt_tracker
 import pyotp
 
 logger = logging.getLogger(__name__)
+
+
+def get_client_ip(request):
+    """Get the real client IP address."""
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(',')[0].strip()
+    else:
+        ip = request.META.get('REMOTE_ADDR', '127.0.0.1')
+    return ip
 
 class RegisterMutation(graphene.Mutation):
     """Registers a new user in the system."""
@@ -98,13 +109,53 @@ class LoginMutation(graphene.Mutation):
     @classmethod
     @transaction.atomic
     def mutate(cls, root, info, email, password):
+        # Get client information for security tracking
+        client_ip = get_client_ip(info.context)
+        user_agent = info.context.META.get('HTTP_USER_AGENT', 'Unknown')
+
+        # Check if IP is locked out
+        if auth_attempt_tracker.is_locked_out(client_ip, 'login'):
+            logger.warning(f"Login attempt from locked out IP: {client_ip}")
+            return LoginMutation(auth_payload=None, errors=["Too many failed attempts. Please try again later."])
+
         user = authenticate(email=email, password=password)
         if not user:
-            logger.warning(f"Login failed for email {email}: Invalid credentials.")
+            # Record failed attempt
+            attempt_status = auth_attempt_tracker.record_attempt(
+                client_ip, False, 'login', email, 'Invalid credentials'
+            )
+
+            # Create database record
+            AuthenticationAttempt.objects.create(
+                email=email,
+                attempt_type='login',
+                ip_address=client_ip,
+                user_agent=user_agent,
+                success=False,
+                failure_reason='Invalid credentials'
+            )
+
+            logger.warning(f"Login failed for email {email}: Invalid credentials. Attempts remaining: {attempt_status['attempts_remaining']}")
             return LoginMutation(auth_payload=None, errors=["Invalid credentials."])
-        
+
         if user.is_suspended:
             reason = getattr(user, 'suspension_reason', 'No reason provided.')
+
+            # Record failed attempt
+            auth_attempt_tracker.record_attempt(
+                client_ip, False, 'login', email, f'Account suspended: {reason}'
+            )
+
+            AuthenticationAttempt.objects.create(
+                email=email,
+                attempt_type='login',
+                ip_address=client_ip,
+                user_agent=user_agent,
+                success=False,
+                failure_reason=f'Account suspended: {reason}',
+                user=user
+            )
+
             logger.warning(f"Login failed for email {email}: Account suspended. Reason: {reason}")
             return LoginMutation(auth_payload=None, errors=[f"Account is suspended. Reason: {reason}"])
 
@@ -117,7 +168,18 @@ class LoginMutation(graphene.Mutation):
         is_mfa_active = bool(enabled_methods)
 
         if not is_mfa_active:
-            # No MFA enabled, return the full auth payload with tokens.
+            # No MFA enabled, record successful attempt and return tokens
+            auth_attempt_tracker.record_attempt(client_ip, True, 'login', email)
+
+            AuthenticationAttempt.objects.create(
+                email=email,
+                attempt_type='login',
+                ip_address=client_ip,
+                user_agent=user_agent,
+                success=True,
+                user=user
+            )
+
             auth_data = create_auth_payload(user, mfa_required=False)
             return LoginMutation(auth_payload=AuthPayloadType(**auth_data))
 

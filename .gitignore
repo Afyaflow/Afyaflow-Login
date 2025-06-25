@@ -63,3 +63,5 @@ Afyaflow Authentication Workflow.md
 authentication_enhancement_plan.md
 Afyaflow Authentication frontend Workflow.md
 .idea/
+test_security_fixes.py
+SECURITY_CONFIGURATION.md

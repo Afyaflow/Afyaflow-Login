@@ -21,3 +21,5 @@ django-environ
 django-filter
 djangorestframework-simplejwt
 graphql-core
+django-ratelimit>=4.1.0
+graphql-query-complexity>=0.1.0

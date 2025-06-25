@@ -75,6 +75,24 @@ class User(AbstractUser):
     def get_full_name(self):
         return f"{self.first_name} {self.last_name}".strip()
 
+    @property
+    def has_mfa_enabled(self):
+        """Check if user has any MFA method enabled."""
+        return (self.mfa_totp_setup_complete or
+                self.mfa_email_enabled or
+                (self.mfa_sms_enabled and self.phone_number_verified))
+
+    def get_enabled_mfa_methods(self):
+        """Get list of enabled MFA methods for the user."""
+        methods = []
+        if self.mfa_totp_setup_complete:
+            methods.append("TOTP")
+        if self.mfa_email_enabled:
+            methods.append("EMAIL")
+        if self.mfa_sms_enabled and self.phone_number_verified:
+            methods.append("SMS")
+        return methods
+
 
 class RefreshToken(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -89,4 +107,48 @@ class RefreshToken(models.Model):
         verbose_name_plural = _('refresh tokens')
 
     def __str__(self):
-        return f"{self.user.email} - {self.created_at}" 
+        return f"{self.user.email} - {self.created_at}"
+
+
+class AuthenticationAttempt(models.Model):
+    """Track authentication attempts for security monitoring and analysis."""
+
+    ATTEMPT_TYPES = [
+        ('login', 'Login'),
+        ('social_login', 'Social Login'),
+        ('password_reset', 'Password Reset'),
+        ('mfa_verification', 'MFA Verification'),
+        ('registration', 'Registration'),
+    ]
+
+    email = models.EmailField(null=True, blank=True, help_text="Email address used in attempt")
+    attempt_type = models.CharField(max_length=20, choices=ATTEMPT_TYPES, default='login')
+    ip_address = models.GenericIPAddressField(help_text="IP address of the attempt")
+    user_agent = models.TextField(help_text="User agent string")
+    success = models.BooleanField(help_text="Whether the attempt was successful")
+    failure_reason = models.CharField(max_length=255, null=True, blank=True,
+                                    help_text="Reason for failure if unsuccessful")
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                           help_text="User associated with the attempt (if known)")
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    # Additional context data
+    provider = models.CharField(max_length=50, null=True, blank=True,
+                              help_text="Social auth provider (if applicable)")
+    metadata = models.JSONField(default=dict, blank=True,
+                              help_text="Additional metadata about the attempt")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['email', 'timestamp']),
+            models.Index(fields=['ip_address', 'timestamp']),
+            models.Index(fields=['attempt_type', 'timestamp']),
+            models.Index(fields=['success', 'timestamp']),
+        ]
+        ordering = ['-timestamp']
+        verbose_name = _('authentication attempt')
+        verbose_name_plural = _('authentication attempts')
+
+    def __str__(self):
+        status = "Success" if self.success else "Failed"
+        return f"{status} {self.attempt_type} attempt for {self.email or 'Unknown'} at {self.timestamp}"
