@@ -97,7 +97,7 @@ class User(AbstractUser):
 class RefreshToken(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='refresh_tokens')
-    token = models.CharField(max_length=255, unique=True)
+    token = models.CharField(max_length=512, unique=True)  # Increased from 255 to 512 for JWT tokens
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
     is_revoked = models.BooleanField(default=False)
@@ -137,6 +137,27 @@ class AuthenticationAttempt(models.Model):
                               help_text="Social auth provider (if applicable)")
     metadata = models.JSONField(default=dict, blank=True,
                               help_text="Additional metadata about the attempt")
+
+    @staticmethod
+    def truncate_failure_reason(reason: str) -> str:
+        """
+        Truncate failure reason to fit the database field constraint.
+
+        Args:
+            reason: The failure reason string
+
+        Returns:
+            Truncated reason that fits within 255 characters
+        """
+        if not reason:
+            return reason
+
+        max_length = 255
+        if len(reason) <= max_length:
+            return reason
+
+        # Truncate and add ellipsis to indicate truncation
+        return reason[:max_length-3] + '...'
 
     class Meta:
         indexes = [

@@ -141,9 +141,14 @@ class LoginMutation(graphene.Mutation):
         if user.is_suspended:
             reason = getattr(user, 'suspension_reason', 'No reason provided.')
 
+            # Create failure reason and truncate if necessary
+            failure_reason = AuthenticationAttempt.truncate_failure_reason(
+                f'Account suspended: {reason}'
+            )
+
             # Record failed attempt
             auth_attempt_tracker.record_attempt(
-                client_ip, False, 'login', email, f'Account suspended: {reason}'
+                client_ip, False, 'login', email, failure_reason
             )
 
             AuthenticationAttempt.objects.create(
@@ -152,7 +157,7 @@ class LoginMutation(graphene.Mutation):
                 ip_address=client_ip,
                 user_agent=user_agent,
                 success=False,
-                failure_reason=f'Account suspended: {reason}',
+                failure_reason=failure_reason,
                 user=user
             )
 
