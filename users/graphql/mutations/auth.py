@@ -7,7 +7,7 @@ from django.utils import timezone
 from graphql import GraphQLError
 
 from ..types import AuthPayloadType, OrganizationStub, MfaChallengeType, LoginPayload, ScopedAuthPayload, GetScopedAccessTokenPayload
-from ..services import create_auth_payload, get_user_organization_memberships
+from ..services import create_auth_payload, get_user_organization_memberships, get_user_organization_roles
 from ...models import RefreshToken, User, AuthenticationAttempt
 from ...serializers import UserRegistrationSerializer
 from ...authentication import create_token, JWTAuthentication, create_oct_token
@@ -349,14 +349,25 @@ class GetScopedAccessToken(graphene.Mutation):
             logger.warning(f"Security risk: User {user.id} attempted to get OCT for org {organization_id} they are not a member of.")
             return cls(payload=None, errors=["You do not have permission to access this organization."])
 
-        # 3. Create the Organization Context Token (OCT)
-        oct_token_str, _ = create_oct_token(user.id, organization_id)
-        logger.info(f"Successfully created OCT for user {user.email} in organization {organization_id}")
+        # 3. Get user roles for the organization
+        user_roles = get_user_organization_roles(user.id, organization_id)
+        logger.info(f"Retrieved roles for user {user.email} in org {organization_id}: {user_roles}")
 
-        # 4. Construct the payload
+        # 4. Create the enhanced Organization Context Token (OCT) with user details
+        oct_token_str, _ = create_oct_token(
+            user_id=user.id,
+            organization_id=organization_id,
+            user_email=user.email,
+            user_first_name=user.first_name,
+            user_last_name=user.last_name,
+            user_roles=user_roles
+        )
+        logger.info(f"Successfully created enhanced OCT for user {user.email} in organization {organization_id}")
+
+        # 5. Construct the payload
         scoped_payload = ScopedAuthPayload(
             oct=oct_token_str,
             user=user
         )
-        
+
         return cls(payload=scoped_payload)

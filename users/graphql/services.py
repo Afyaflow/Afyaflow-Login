@@ -50,20 +50,79 @@ def get_organization_permissions(user_id: str, organization_id: str) -> list:
         }
     """
     variables = {"userId": str(user_id), "organizationId": str(organization_id)}
-    
+
     response_data = _execute_org_service_query(query, variables)
-    
+
     if not response_data or 'errors' in response_data:
         logger.error(f"Error fetching permissions from Org Service: {response_data.get('errors')}")
         return []
-        
+
     roles = response_data.get('data', {}).get('userProfessionalRoles', [])
-    
+
     # Flatten the list of permissions from all roles and remove duplicates
     permissions = list(set(p for role_item in roles for p in role_item.get('role', {}).get('permissions', [])))
-    
+
     logger.info(f"Fetched permissions for user {user_id} in org {organization_id}: {permissions}")
     return permissions
+
+
+def get_user_organization_roles(user_id: str, organization_id: str) -> list:
+    """
+    Fetches user's professional roles for a given organization from the Organization Service.
+    Returns a list of role names (e.g., ['doctor', 'member']).
+    """
+    query = """
+        query GetUserOrganizationRoles($userId: String!, $organizationId: String!) {
+            organizationMemberships(where: {
+                userId: { equals: $userId },
+                organizationId: { equals: $organizationId }
+            }) {
+                role
+                professionalRoles {
+                    role {
+                        name
+                        category
+                    }
+                }
+            }
+        }
+    """
+    variables = {"userId": str(user_id), "organizationId": str(organization_id)}
+
+    response_data = _execute_org_service_query(query, variables)
+
+    if not response_data or 'errors' in response_data:
+        logger.error(f"Error fetching user roles from Org Service: {response_data.get('errors')}")
+        return ["member"]  # Default fallback role
+
+    memberships = response_data.get('data', {}).get('organizationMemberships', [])
+
+    if not memberships:
+        logger.warning(f"No organization membership found for user {user_id} in org {organization_id}")
+        return ["member"]  # Default fallback role
+
+    roles = []
+
+    # Get the first membership (should only be one per user per org)
+    membership = memberships[0]
+
+    # Add organization role (e.g., 'ADMIN', 'MEMBER')
+    org_role = membership.get('role', '').lower()
+    if org_role:
+        roles.append(org_role)
+
+    # Add professional roles (e.g., 'doctor', 'nurse')
+    professional_roles = membership.get('professionalRoles', [])
+    for prof_role in professional_roles:
+        role_name = prof_role.get('role', {}).get('name', '').lower()
+        if role_name:
+            roles.append(role_name)
+
+    # Remove duplicates and ensure we have at least 'member'
+    roles = list(set(roles)) if roles else ["member"]
+
+    logger.info(f"Fetched roles for user {user_id} in org {organization_id}: {roles}")
+    return roles
 
 
 def get_user_organization_memberships(user_id: str) -> list:

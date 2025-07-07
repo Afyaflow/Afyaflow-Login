@@ -129,15 +129,18 @@ def create_token(user_id: str, token_type: str = 'access') -> Tuple[str, datetim
     return token, expires_at
 
 
-def create_oct_token(user_id: str, organization_id: str) -> Tuple[str, datetime]:
+def create_oct_token(user_id: str, organization_id: str, user_email: str = None,
+                    user_first_name: str = None, user_last_name: str = None,
+                    user_roles: list = None) -> Tuple[str, datetime]:
     """
     Create a new Organization Context Token (OCT) for the given user and organization.
+    Enhanced version that includes user details in the token payload.
     """
     now = timezone.now()
     lifetime = timedelta(minutes=settings.JWT_OCT_LIFETIME)
     expires_at = now + lifetime
 
-    # Create the token payload
+    # Create the base token payload
     payload = {
         'sub': str(user_id),  # subject (user id)
         'org_id': str(organization_id), # organization id
@@ -145,6 +148,16 @@ def create_oct_token(user_id: str, organization_id: str) -> Tuple[str, datetime]
         'iat': now.timestamp(),  # issued at
         'exp': expires_at.timestamp(),  # expiration time
     }
+
+    # Add enhanced user details if provided
+    if user_email:
+        payload['user_email'] = user_email
+    if user_first_name:
+        payload['user_first_name'] = user_first_name
+    if user_last_name:
+        payload['user_last_name'] = user_last_name
+    if user_roles:
+        payload['user_roles'] = user_roles
 
     # Create the token
     token = jwt.encode(
