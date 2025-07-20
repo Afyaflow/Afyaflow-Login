@@ -12,6 +12,20 @@ class UserType(DjangoObjectType):
     primary_role = graphene.String(source='get_primary_role_name', description="The user's primary role (PATIENT, PROVIDER, ADMIN)")
     roles = graphene.List(graphene.String, description="List of all active roles for this user")
 
+    # Enhanced email field that handles phone-based users
+    email = graphene.String(description="User's email address (null for phone-only users)")
+    is_phone_only_user = graphene.Boolean(description="True if user registered with phone number only")
+
+    def resolve_email(self, info):
+        """Return email only if it's a real email, not a phone-based identifier."""
+        if self.email and '@phone.afyaflow.local' in self.email:
+            return None  # Don't expose phone-based email identifiers
+        return self.email
+
+    def resolve_is_phone_only_user(self, info):
+        """Check if this user registered with phone number only."""
+        return self.email and '@phone.afyaflow.local' in self.email
+
     def resolve_roles(self, info):
         """Return list of active role names for this user."""
         return [role.name for role in self.get_active_roles()]
@@ -19,11 +33,11 @@ class UserType(DjangoObjectType):
     class Meta:
         model = User
         fields = (
-            "id", "email", "first_name", "last_name", "is_active", "is_staff",
+            "id", "first_name", "last_name", "is_active", "is_staff",
             "is_superuser", "is_suspended", "date_joined", "last_login",
             "email_verified",
             "phone_number", "phone_number_verified",
-            "primary_role", "roles"  # Role-related fields
+            "primary_role", "roles", "email", "is_phone_only_user"  # Enhanced fields
         )
         description = "Represents a user within the Afyaflow system."
         # You can also use exclude = ("password", "other_sensitive_fields")

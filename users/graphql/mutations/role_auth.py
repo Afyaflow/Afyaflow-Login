@@ -89,11 +89,14 @@ class InitiatePatientAuthMutation(graphene.Mutation):
                     
             except User.DoesNotExist:
                 # Create new patient user with phone
+                # Use phone number as unique identifier in email format for database constraints
+                phone_email = f"{phone_number.replace('+', '').replace(' ', '')}@phone.afyaflow.local"
                 user = User.objects.create_user(
-                    email=f"patient_{phone_number}@temp.local",  # Temporary email
+                    email=phone_email,  # Phone-based email identifier
                     phone_number=phone_number,
                     is_passwordless=True,
-                    phone_number_verified=False
+                    phone_number_verified=False,
+                    email_verified=False  # This is not a real email
                 )
                 role_manager = RoleManager(user)
                 role_manager.assign_role('PATIENT', reason='Auto-registration via patient phone authentication')
@@ -183,9 +186,11 @@ class CompletePatientAuthMutation(graphene.Mutation):
                 raise GraphQLError("User is not a patient")
             
             # Mark email/phone as verified
-            if '@temp.local' not in user.email:
+            if '@phone.afyaflow.local' not in user.email:
+                # This is a real email address, mark as verified
                 user.email_verified = True
             if user.phone_number:
+                # Mark phone as verified for phone-based authentication
                 user.phone_number_verified = True
             user.save()
             
