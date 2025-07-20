@@ -230,11 +230,14 @@ class RoleManager:
         # Check role compatibility
         current_roles = set(self.user.get_active_roles().values_list('name', flat=True))
         
-        # Business rules for role compatibility
+        # Business rules for role compatibility (Healthcare-friendly)
+        # In healthcare, dual roles are common and necessary:
+        # - Doctors who are also patients
+        # - Nurses who receive care
+        # - Staff who need both provider and patient access
         incompatible_combinations = {
-            'PATIENT': ['PROVIDER', 'ADMIN'],
-            'PROVIDER': ['PATIENT'],
-            'ADMIN': ['PATIENT']
+            'ADMIN': ['PATIENT', 'PROVIDER'],  # Only admins are exclusive
+            # PATIENT and PROVIDER can coexist for healthcare scenarios
         }
         
         if role.name in incompatible_combinations:
@@ -380,11 +383,11 @@ class RoleValidationService:
         Returns:
             Dict with validation results
         """
-        # Define allowed transitions
+        # Define allowed transitions (Healthcare-friendly dual roles)
         allowed_transitions = {
-            'PATIENT': ['PROVIDER'],  # Patients can become providers
-            'PROVIDER': ['ADMIN'],    # Providers can become admins
-            'ADMIN': []               # Admins cannot transition (would need to be removed and re-added)
+            'PATIENT': ['PROVIDER', 'ADMIN'],    # Patients can become providers or admins
+            'PROVIDER': ['PATIENT', 'ADMIN'],    # Providers can also be patients or admins
+            'ADMIN': ['PATIENT', 'PROVIDER']     # Admins can have any role (for testing/flexibility)
         }
         
         if to_role not in allowed_transitions.get(from_role, []):
