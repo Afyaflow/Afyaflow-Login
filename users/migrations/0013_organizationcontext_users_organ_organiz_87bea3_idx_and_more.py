@@ -46,8 +46,24 @@ class Migration(migrations.Migration):
             model_name='serviceaccount',
             index=models.Index(fields=['created_at'], name='users_servi_created_4da095_idx'),
         ),
-        migrations.AddConstraint(
-            model_name='organizationcontext',
-            constraint=models.UniqueConstraint(fields=('organization_id', 'branch_id', 'cluster_id'), name='unique_org_branch_cluster'),
+        migrations.RunSQL(
+            sql="""
+            DO $$
+            BEGIN
+                -- Only add constraint if it doesn't exist
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'unique_org_branch_cluster'
+                ) THEN
+                    ALTER TABLE users_organizationcontext
+                    ADD CONSTRAINT unique_org_branch_cluster
+                    UNIQUE (organization_id, branch_id, cluster_id);
+                END IF;
+            END $$;
+            """,
+            reverse_sql="""
+            ALTER TABLE users_organizationcontext
+            DROP CONSTRAINT IF EXISTS unique_org_branch_cluster;
+            """
         ),
     ]
