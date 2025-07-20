@@ -8,6 +8,8 @@ from graphql import GraphQLError
 
 from ..types import AuthPayloadType, OrganizationStub, MfaChallengeType, LoginPayload, ScopedAuthPayload, GetScopedAccessTokenPayload
 from ..services import create_auth_payload, get_user_organization_memberships, get_user_organization_roles
+from ..client_auth import require_client_auth, get_client_from_context, log_client_operation, get_client_token_config
+from ...client_jwt import ClientJWTAuthenticationBackend
 from ...models import RefreshToken, User, AuthenticationAttempt
 from ...serializers import UserRegistrationSerializer
 from ...authentication import create_token, JWTAuthentication, create_oct_token
@@ -36,11 +38,14 @@ class RegisterMutation(graphene.Mutation):
         password_confirm = graphene.String(required=True)
         first_name = graphene.String(required=True)
         last_name = graphene.String(required=True)
+        client_id = graphene.String(required=True, description="Client ID for authentication")
+        client_api_key = graphene.String(required=True, description="Client API key for authentication")
 
     auth_payload = graphene.Field(AuthPayloadType)
     errors = graphene.List(graphene.String)
 
     @classmethod
+    @require_client_auth(['PROVIDER_WEB', 'PROVIDER_MOBILE'])
     @transaction.atomic
     def mutate(cls, root, info, email, password, password_confirm, first_name, last_name):
         serializer = UserRegistrationSerializer(data={
@@ -102,11 +107,14 @@ class LoginMutation(graphene.Mutation):
     class Arguments:
         email = graphene.String(required=True)
         password = graphene.String(required=True)
+        client_id = graphene.String(required=True, description="Client ID for authentication")
+        client_api_key = graphene.String(required=True, description="Client API key for authentication")
 
     auth_payload = graphene.Field(AuthPayloadType)
     errors = graphene.List(graphene.String)
 
     @classmethod
+    @require_client_auth(['PROVIDER_WEB', 'PROVIDER_MOBILE'])
     @transaction.atomic
     def mutate(cls, root, info, email, password):
         # Get client information for security tracking
@@ -185,7 +193,16 @@ class LoginMutation(graphene.Mutation):
                 user=user
             )
 
-            auth_data = create_auth_payload(user, mfa_required=False)
+            # Get client and device fingerprint from context
+            client = get_client_from_context(info)
+            device_fingerprint = info.context.META.get('HTTP_X_DEVICE_FINGERPRINT')
+
+            auth_data = create_auth_payload(
+                user,
+                mfa_required=False,
+                client=client,
+                device_fingerprint=device_fingerprint
+            )
             return LoginMutation(auth_payload=AuthPayloadType(**auth_data))
 
         # MFA is active, so we start the two-step challenge.
@@ -276,11 +293,14 @@ class RefreshTokenMutation(graphene.Mutation):
     """Refreshes a user's access token."""
     class Arguments:
         refresh_token = graphene.String(required=True)
+        client_id = graphene.String(required=True, description="Client ID for authentication")
+        client_api_key = graphene.String(required=True, description="Client API key for authentication")
 
     access_token = graphene.String()
     errors = graphene.List(graphene.String)
 
     @classmethod
+    @require_client_auth()
     def mutate(cls, root, info, refresh_token):
         try:
             token_obj = RefreshToken.objects.get(

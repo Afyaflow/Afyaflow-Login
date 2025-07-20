@@ -84,6 +84,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
+    'users.client_middleware.ClientAuthenticationMiddleware',  # New client auth middleware
     'users.security_middleware.RateLimitMiddleware',
     'users.security_middleware.SecurityHeadersMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -132,6 +133,35 @@ DATABASES = {
 # In production, Railway provides a DATABASE_URL environment variable.
 if 'DATABASE_URL' in os.environ:
     DATABASES['default'] = dj_database_url.config(conn_max_age=600, ssl_require=True)
+
+# Cache configuration for rate limiting and security monitoring
+REDIS_URL = os.getenv('REDIS_URL')
+if REDIS_URL:
+    # Use Redis cache if available (Railway Redis)
+    CACHES = {
+        'default': {
+            'BACKEND': 'django_redis.cache.RedisCache',
+            'LOCATION': REDIS_URL,
+            'OPTIONS': {
+                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+                'CONNECTION_POOL_KWARGS': {
+                    'max_connections': 20,
+                    'retry_on_timeout': True,
+                },
+            },
+            'KEY_PREFIX': 'afyaflow_auth',
+            'TIMEOUT': 300,  # 5 minutes default timeout
+        }
+    }
+else:
+    # Fallback to database cache
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+            'LOCATION': 'auth_cache_table',
+            'TIMEOUT': 300,
+        }
+    }
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -308,3 +338,94 @@ SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = 'Strict' if not DEBUG else 'Lax'
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SAMESITE = 'Strict' if not DEBUG else 'Lax'
+
+# ============================================================================
+# ENHANCED AUTHENTICATION SYSTEM CONFIGURATION
+# ============================================================================
+
+# Client Authentication Settings
+CLIENT_AUTH_ENABLED = os.getenv('CLIENT_AUTH_ENABLED', 'true').lower() in ('true', '1', 't')
+CLIENT_RATE_LIMITING_ENABLED = os.getenv('CLIENT_RATE_LIMITING_ENABLED', 'true').lower() in ('true', '1', 't')
+CLIENT_DOMAIN_VALIDATION_ENABLED = os.getenv('CLIENT_DOMAIN_VALIDATION_ENABLED', 'true').lower() in ('true', '1', 't')
+
+# Security Monitoring Settings
+SECURITY_MONITORING_ENABLED = os.getenv('SECURITY_MONITORING_ENABLED', 'true').lower() in ('true', '1', 't')
+ENHANCED_LOGGING_ENABLED = os.getenv('ENHANCED_LOGGING_ENABLED', 'true').lower() in ('true', '1', 't')
+
+# JWT Configuration Updates
+JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256')
+JWT_ACCESS_TOKEN_LIFETIME = int(os.getenv('JWT_ACCESS_TOKEN_LIFETIME', '60'))  # minutes
+JWT_REFRESH_TOKEN_LIFETIME = int(os.getenv('JWT_REFRESH_TOKEN_LIFETIME', '10080'))  # 7 days
+
+# Email/SMS Service Integration (using existing microservice)
+# EMAIL_SERVICE_URL and INTERNAL_SERVICE_TOKEN are already configured above
+# No additional email/SMS configuration needed - using existing communication_client.py
+
+# Enhanced CORS settings for client authentication
+if CLIENT_AUTH_ENABLED:
+    CORS_ALLOWED_HEADERS = [
+        'accept',
+        'accept-encoding',
+        'authorization',
+        'content-type',
+        'dnt',
+        'origin',
+        'user-agent',
+        'x-csrftoken',
+        'x-requested-with',
+        'x-client-id',           # New client authentication headers
+        'x-api-key',
+        'x-device-fingerprint',
+    ]
+
+# Logging Configuration for Enhanced Authentication
+if ENHANCED_LOGGING_ENABLED:
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'formatters': {
+            'verbose': {
+                'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+                'style': '{',
+            },
+            'simple': {
+                'format': '{levelname} {message}',
+                'style': '{',
+            },
+        },
+        'handlers': {
+            'console': {
+                'level': 'INFO',
+                'class': 'logging.StreamHandler',
+                'formatter': 'verbose',
+            },
+            'file': {
+                'level': 'INFO',
+                'class': 'logging.FileHandler',
+                'filename': '/tmp/auth_service.log',
+                'formatter': 'verbose',
+            },
+        },
+        'loggers': {
+            'users.client_middleware': {
+                'handlers': ['console', 'file'],
+                'level': 'INFO',
+                'propagate': True,
+            },
+            'users.security_monitoring': {
+                'handlers': ['console', 'file'],
+                'level': 'INFO',
+                'propagate': True,
+            },
+            'users.client_utils': {
+                'handlers': ['console', 'file'],
+                'level': 'INFO',
+                'propagate': True,
+            },
+            'users.role_management': {
+                'handlers': ['console', 'file'],
+                'level': 'INFO',
+                'propagate': True,
+            },
+        },
+    }

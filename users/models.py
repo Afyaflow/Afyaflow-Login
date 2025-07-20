@@ -2,6 +2,336 @@ import uuid
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
 from django.utils.translation import gettext_lazy as _
+from django.core.exceptions import ValidationError
+from django.utils import timezone
+
+
+class UserRole(models.Model):
+    """
+    Defines user roles in the system (PATIENT, PROVIDER, ADMIN).
+    Supports role-based authentication and access control.
+    """
+
+    ROLE_CHOICES = [
+        ('PATIENT', 'Patient'),
+        ('PROVIDER', 'Provider'),
+        ('ADMIN', 'Admin'),
+    ]
+
+    name = models.CharField(
+        max_length=20,
+        unique=True,
+        choices=ROLE_CHOICES,
+        help_text="Role name (PATIENT, PROVIDER, ADMIN)"
+    )
+    description = models.TextField(
+        blank=True,
+        help_text="Description of the role and its permissions"
+    )
+    permissions = models.JSONField(
+        default=list,
+        help_text="List of permissions associated with this role"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this role is currently active"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _('user role')
+        verbose_name_plural = _('user roles')
+        indexes = [
+            models.Index(fields=['name']),
+            models.Index(fields=['is_active']),
+        ]
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        """Validate role data."""
+        super().clean()
+        if self.name and self.name not in dict(self.ROLE_CHOICES):
+            raise ValidationError(f"Invalid role name: {self.name}")
+
+    @classmethod
+    def get_default_permissions(cls, role_name):
+        """Get default permissions for a role."""
+        default_permissions = {
+            'PATIENT': [
+                'view_own_profile',
+                'update_own_profile',
+                'view_own_medical_records',
+                'access_patient_apps'
+            ],
+            'PROVIDER': [
+                'view_own_profile',
+                'update_own_profile',
+                'view_patient_records',
+                'create_medical_records',
+                'update_medical_records',
+                'access_provider_apps',
+                'manage_organization_patients'
+            ],
+            'ADMIN': [
+                'view_all_users',
+                'manage_users',
+                'manage_organizations',
+                'view_system_logs',
+                'manage_system_settings',
+                'access_admin_interface'
+            ]
+        }
+        return default_permissions.get(role_name, [])
+
+
+class RegisteredClient(models.Model):
+    """
+    Represents a registered client application that can authenticate with the service.
+    Provides client-specific security policies and token isolation.
+    """
+
+    CLIENT_TYPES = [
+        ('PATIENT_WEB', 'Patient Web Application (Waridi)'),
+        ('PATIENT_MOBILE', 'Patient Mobile Application (Afyaflow Mobile)'),
+        ('PROVIDER_WEB', 'Provider Web Application'),
+        ('PROVIDER_MOBILE', 'Provider Mobile Application'),
+        ('ADMIN_WEB', 'Admin Web Application'),
+    ]
+
+    client_id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        help_text="Unique client identifier"
+    )
+    client_name = models.CharField(
+        max_length=100,
+        help_text="Human-readable client name"
+    )
+    client_type = models.CharField(
+        max_length=20,
+        choices=CLIENT_TYPES,
+        help_text="Type of client application"
+    )
+    allowed_domains = models.JSONField(
+        default=list,
+        help_text="List of allowed domains for this client"
+    )
+    api_key_hash = models.CharField(
+        max_length=255,
+        help_text="Hashed API key for client authentication"
+    )
+    signing_key = models.TextField(
+        help_text="Unique JWT signing key for this client"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this client is currently active"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    # Security policy fields
+    max_requests_per_minute = models.IntegerField(
+        default=60,
+        help_text="Rate limit for this client"
+    )
+    token_lifetime_access = models.IntegerField(
+        default=60,
+        help_text="Access token lifetime in minutes"
+    )
+    token_lifetime_refresh = models.IntegerField(
+        default=10080,  # 7 days
+        help_text="Refresh token lifetime in minutes"
+    )
+    require_device_fingerprint = models.BooleanField(
+        default=False,
+        help_text="Whether device fingerprinting is required"
+    )
+    allow_social_login = models.BooleanField(
+        default=True,
+        help_text="Whether social login is allowed for this client"
+    )
+    require_totp = models.BooleanField(
+        default=False,
+        help_text="Whether TOTP is required for this client"
+    )
+    enhanced_monitoring = models.BooleanField(
+        default=False,
+        help_text="Whether enhanced security monitoring is enabled"
+    )
+
+    class Meta:
+        verbose_name = _('registered client')
+        verbose_name_plural = _('registered clients')
+        indexes = [
+            models.Index(fields=['client_type']),
+            models.Index(fields=['is_active']),
+            models.Index(fields=['created_at']),
+        ]
+        ordering = ['client_name']
+
+    def __str__(self):
+        return f"{self.client_name} ({self.client_type})"
+
+    def clean(self):
+        """Validate client data."""
+        super().clean()
+        if self.client_type and self.client_type not in dict(self.CLIENT_TYPES):
+            raise ValidationError(f"Invalid client type: {self.client_type}")
+
+    @property
+    def security_policy(self):
+        """Get the security policy for this client."""
+        return {
+            'max_requests_per_minute': self.max_requests_per_minute,
+            'token_lifetime_access': self.token_lifetime_access,
+            'token_lifetime_refresh': self.token_lifetime_refresh,
+            'require_device_fingerprint': self.require_device_fingerprint,
+            'allow_social_login': self.allow_social_login,
+            'require_totp': self.require_totp,
+            'enhanced_monitoring': self.enhanced_monitoring,
+        }
+
+    @classmethod
+    def get_default_security_policy(cls, client_type):
+        """Get default security policy for a client type."""
+        policies = {
+            'PATIENT_WEB': {
+                'max_requests_per_minute': 60,
+                'token_lifetime_access': 60,
+                'token_lifetime_refresh': 43200,  # 30 days
+                'require_device_fingerprint': True,
+                'allow_social_login': False,
+                'require_totp': False,
+                'enhanced_monitoring': False,
+            },
+            'PATIENT_MOBILE': {
+                'max_requests_per_minute': 100,
+                'token_lifetime_access': 60,
+                'token_lifetime_refresh': 43200,  # 30 days
+                'require_device_fingerprint': True,
+                'allow_social_login': False,
+                'require_totp': False,
+                'enhanced_monitoring': False,
+            },
+            'PROVIDER_WEB': {
+                'max_requests_per_minute': 120,
+                'token_lifetime_access': 15,
+                'token_lifetime_refresh': 10080,  # 7 days
+                'require_device_fingerprint': False,
+                'allow_social_login': True,
+                'require_totp': True,
+                'enhanced_monitoring': True,
+            },
+            'PROVIDER_MOBILE': {
+                'max_requests_per_minute': 150,
+                'token_lifetime_access': 15,
+                'token_lifetime_refresh': 10080,  # 7 days
+                'require_device_fingerprint': False,
+                'allow_social_login': True,
+                'require_totp': True,
+                'enhanced_monitoring': True,
+            },
+            'ADMIN_WEB': {
+                'max_requests_per_minute': 200,
+                'token_lifetime_access': 15,
+                'token_lifetime_refresh': 1440,  # 1 day
+                'require_device_fingerprint': True,
+                'allow_social_login': False,
+                'require_totp': True,
+                'enhanced_monitoring': True,
+            },
+        }
+        return policies.get(client_type, {})
+
+
+class UserRoleAssignment(models.Model):
+    """
+    Represents the assignment of a role to a user.
+    Supports multiple roles per user with audit trail.
+    """
+
+    user = models.ForeignKey(
+        'User',  # Forward reference since User is defined later
+        on_delete=models.CASCADE,
+        related_name='role_assignments',
+        help_text="User assigned to this role"
+    )
+    role = models.ForeignKey(
+        UserRole,
+        on_delete=models.CASCADE,
+        related_name='user_assignments',
+        help_text="Role assigned to the user"
+    )
+    assigned_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When the role was assigned"
+    )
+    assigned_by = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='role_assignments_made',
+        help_text="User who made this role assignment"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this role assignment is currently active"
+    )
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this role assignment expires (optional)"
+    )
+
+    class Meta:
+        verbose_name = _('user role assignment')
+        verbose_name_plural = _('user role assignments')
+        indexes = [
+            models.Index(fields=['user', 'role']),
+            models.Index(fields=['user', 'is_active']),
+            models.Index(fields=['role', 'is_active']),
+            models.Index(fields=['assigned_at']),
+            models.Index(fields=['expires_at']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'role'],
+                condition=models.Q(is_active=True),
+                name='unique_active_user_role'
+            )
+        ]
+        ordering = ['-assigned_at']
+
+    def __str__(self):
+        return f"{self.user.email} - {self.role.name}"
+
+    def clean(self):
+        """Validate role assignment."""
+        super().clean()
+
+        # Check if expires_at is in the future
+        if self.expires_at and self.expires_at <= timezone.now():
+            raise ValidationError("Expiration date must be in the future")
+
+    @property
+    def is_expired(self):
+        """Check if this role assignment has expired."""
+        if not self.expires_at:
+            return False
+        from django.utils import timezone
+        return timezone.now() > self.expires_at
+
+    @property
+    def is_valid(self):
+        """Check if this role assignment is currently valid."""
+        return self.is_active and not self.is_expired
 
 
 class UserManager(BaseUserManager):
@@ -60,6 +390,29 @@ class User(AbstractUser):
     password_reset_token = models.CharField(max_length=128, null=True, blank=True)
     password_reset_token_expires_at = models.DateTimeField(null=True, blank=True)
 
+    # Role and authentication enhancement fields
+    primary_role = models.ForeignKey(
+        UserRole,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='primary_users',
+        help_text="Primary role for this user"
+    )
+    is_passwordless = models.BooleanField(
+        default=False,
+        help_text="Whether this user uses passwordless authentication (patients)"
+    )
+    device_trust_enabled = models.BooleanField(
+        default=False,
+        help_text="Whether device trust is enabled for extended sessions"
+    )
+    last_security_check = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time security policies were checked for this user"
+    )
+
     objects = UserManager()
 
     USERNAME_FIELD = 'email'
@@ -93,6 +446,101 @@ class User(AbstractUser):
             methods.append("SMS")
         return methods
 
+    # Role-related methods
+    def get_active_roles(self):
+        """Get all active roles for this user."""
+        return UserRole.objects.filter(
+            user_assignments__user=self,
+            user_assignments__is_active=True,
+            is_active=True
+        ).distinct()
+
+    def has_role(self, role_name):
+        """Check if user has a specific role."""
+        return self.get_active_roles().filter(name=role_name).exists()
+
+    def is_patient(self):
+        """Check if user has PATIENT role."""
+        return self.has_role('PATIENT')
+
+    def is_provider(self):
+        """Check if user has PROVIDER role."""
+        return self.has_role('PROVIDER')
+
+    def is_admin_user(self):
+        """Check if user has ADMIN role."""
+        return self.has_role('ADMIN')
+
+    def get_primary_role_name(self):
+        """Get the name of the primary role."""
+        return self.primary_role.name if self.primary_role else None
+
+    def assign_role(self, role_name, assigned_by=None):
+        """Assign a role to this user."""
+        try:
+            role = UserRole.objects.get(name=role_name, is_active=True)
+            assignment, created = UserRoleAssignment.objects.get_or_create(
+                user=self,
+                role=role,
+                defaults={
+                    'assigned_by': assigned_by,
+                    'is_active': True
+                }
+            )
+
+            # Set as primary role if user doesn't have one
+            if not self.primary_role:
+                self.primary_role = role
+                self.save(update_fields=['primary_role'])
+
+            return assignment
+        except UserRole.DoesNotExist:
+            raise ValueError(f"Role '{role_name}' does not exist or is not active")
+
+    def remove_role(self, role_name):
+        """Remove a role from this user."""
+        UserRoleAssignment.objects.filter(
+            user=self,
+            role__name=role_name,
+            is_active=True
+        ).update(is_active=False)
+
+        # Clear primary role if it was removed
+        if self.primary_role and self.primary_role.name == role_name:
+            # Set to another active role if available
+            other_roles = self.get_active_roles().exclude(name=role_name)
+            self.primary_role = other_roles.first()
+            self.save(update_fields=['primary_role'])
+
+    def requires_totp_for_client(self, client_type):
+        """Check if TOTP is required for this user with a specific client type."""
+        if self.is_provider() and client_type in ['PROVIDER_WEB', 'PROVIDER_MOBILE']:
+            return True
+        if self.is_admin_user():
+            return True
+        return False
+
+    def get_token_lifetime_for_client(self, client_type, token_type='access'):
+        """Get appropriate token lifetime based on user role and client type."""
+        if self.is_patient() and client_type in ['PATIENT_WEB', 'PATIENT_MOBILE']:
+            if token_type == 'access':
+                return 60  # 1 hour
+            else:  # refresh
+                return 43200  # 30 days
+        elif self.is_provider() and client_type in ['PROVIDER_WEB', 'PROVIDER_MOBILE']:
+            if token_type == 'access':
+                return 15  # 15 minutes
+            else:  # refresh
+                return 10080  # 7 days
+        elif self.is_admin_user():
+            if token_type == 'access':
+                return 15  # 15 minutes
+            else:  # refresh
+                return 1440  # 1 day
+
+        # Default fallback
+        return 60 if token_type == 'access' else 10080
+
 
 class RefreshToken(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -102,12 +550,52 @@ class RefreshToken(models.Model):
     expires_at = models.DateTimeField()
     is_revoked = models.BooleanField(default=False)
 
+    # Client context fields
+    client = models.ForeignKey(
+        RegisteredClient,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='refresh_tokens',
+        help_text="Client application that issued this token"
+    )
+    client_type = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text="Type of client application"
+    )
+    device_fingerprint = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Device fingerprint for security tracking"
+    )
+
     class Meta:
         verbose_name = _('refresh token')
         verbose_name_plural = _('refresh tokens')
+        indexes = [
+            models.Index(fields=['user', 'client']),
+            models.Index(fields=['client_type']),
+            models.Index(fields=['expires_at']),
+            models.Index(fields=['is_revoked']),
+        ]
 
     def __str__(self):
-        return f"{self.user.email} - {self.created_at}"
+        client_info = f" ({self.client_type})" if self.client_type else ""
+        return f"{self.user.email}{client_info} - {self.created_at}"
+
+    def is_valid_for_client(self, client_id):
+        """Check if this token is valid for the specified client."""
+        if not self.client:
+            return False
+        return str(self.client.client_id) == str(client_id) and not self.is_revoked
+
+    def revoke(self, reason="Manual revocation"):
+        """Revoke this refresh token."""
+        self.is_revoked = True
+        self.save(update_fields=['is_revoked'])
 
 
 class AuthenticationAttempt(models.Model):
@@ -138,6 +626,33 @@ class AuthenticationAttempt(models.Model):
     metadata = models.JSONField(default=dict, blank=True,
                               help_text="Additional metadata about the attempt")
 
+    # Client and role context fields
+    client = models.ForeignKey(
+        RegisteredClient,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='authentication_attempts',
+        help_text="Client application used for this attempt"
+    )
+    client_type = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text="Type of client application"
+    )
+    role_attempted = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text="Role that was being authenticated for"
+    )
+    security_context = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Additional security context and metadata"
+    )
+
     @staticmethod
     def truncate_failure_reason(reason: str) -> str:
         """
@@ -165,6 +680,9 @@ class AuthenticationAttempt(models.Model):
             models.Index(fields=['ip_address', 'timestamp']),
             models.Index(fields=['attempt_type', 'timestamp']),
             models.Index(fields=['success', 'timestamp']),
+            models.Index(fields=['client', 'timestamp']),
+            models.Index(fields=['client_type', 'timestamp']),
+            models.Index(fields=['role_attempted', 'timestamp']),
         ]
         ordering = ['-timestamp']
         verbose_name = _('authentication attempt')
@@ -172,7 +690,9 @@ class AuthenticationAttempt(models.Model):
 
     def __str__(self):
         status = "Success" if self.success else "Failed"
-        return f"{status} {self.attempt_type} attempt for {self.email or 'Unknown'} at {self.timestamp}"
+        client_info = f" via {self.client_type}" if self.client_type else ""
+        role_info = f" for {self.role_attempted}" if self.role_attempted else ""
+        return f"{status} {self.attempt_type} attempt{client_info}{role_info} for {self.email or 'Unknown'} at {self.timestamp}"
 
 
 class BlacklistedToken(models.Model):
@@ -184,15 +704,53 @@ class BlacklistedToken(models.Model):
     reason = models.CharField(max_length=255, help_text="Reason for blacklisting")
     expires_at = models.DateTimeField(help_text="When the original token would have expired")
 
+    # Client context fields
+    client = models.ForeignKey(
+        RegisteredClient,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='blacklisted_tokens',
+        help_text="Client application that issued this token"
+    )
+    client_type = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text="Type of client application"
+    )
+    violation_reason = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Specific security violation that caused blacklisting"
+    )
+
     class Meta:
         indexes = [
             models.Index(fields=['token_jti']),
             models.Index(fields=['user', 'blacklisted_at']),
             models.Index(fields=['expires_at']),
+            models.Index(fields=['client', 'blacklisted_at']),
+            models.Index(fields=['client_type']),
         ]
         ordering = ['-blacklisted_at']
         verbose_name = _('blacklisted token')
         verbose_name_plural = _('blacklisted tokens')
 
     def __str__(self):
-        return f"Blacklisted token for {self.user.email} - {self.reason}"
+        client_info = f" ({self.client_type})" if self.client_type else ""
+        return f"Blacklisted token for {self.user.email}{client_info} - {self.reason}"
+
+    @classmethod
+    def blacklist_token(cls, token_jti, user, reason, expires_at, client=None, client_type=None, violation_reason=None):
+        """Convenience method to blacklist a token with full context."""
+        return cls.objects.create(
+            token_jti=token_jti,
+            user=user,
+            reason=reason,
+            expires_at=expires_at,
+            client=client,
+            client_type=client_type,
+            violation_reason=violation_reason
+        )

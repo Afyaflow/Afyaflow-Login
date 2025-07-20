@@ -55,6 +55,72 @@ python manage.py migrate --noinput
 echo "Collecting static files..."
 python manage.py collectstatic --noinput --clear
 
+# Create cache table for enhanced authentication features
+echo "Setting up cache table for enhanced authentication..."
+python manage.py createcachetable || echo "Cache table already exists or using Redis"
+
+# Create default user roles for enhanced authentication
+echo "Setting up default user roles for enhanced authentication..."
+python -c "
+import os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'afyaflow_auth.settings')
+import django
+django.setup()
+from users.models import UserRole
+
+# Define default roles
+roles = [
+    {
+        'name': 'PATIENT',
+        'description': 'Patient role for healthcare consumers',
+        'permissions': [
+            'view_own_profile',
+            'update_own_profile',
+            'view_own_medical_records',
+            'access_patient_apps'
+        ]
+    },
+    {
+        'name': 'PROVIDER',
+        'description': 'Healthcare provider role',
+        'permissions': [
+            'view_own_profile',
+            'update_own_profile',
+            'view_patient_records',
+            'create_medical_records',
+            'update_medical_records',
+            'access_provider_apps',
+            'manage_organization_patients'
+        ]
+    },
+    {
+        'name': 'ADMIN',
+        'description': 'System administrator role',
+        'permissions': [
+            'view_all_users',
+            'manage_users',
+            'manage_organizations',
+            'view_system_logs',
+            'manage_system_settings',
+            'access_admin_interface'
+        ]
+    }
+]
+
+# Create roles if they don't exist
+for role_data in roles:
+    role, created = UserRole.objects.get_or_create(
+        name=role_data['name'],
+        defaults=role_data
+    )
+    if created:
+        print(f'✅ Created role: {role.name}')
+    else:
+        print(f'ℹ️ Role already exists: {role.name}')
+
+print('User roles setup completed!')
+"
+
 # Create a test admin user if it doesn't exist
 echo "Checking if we need to create a test admin user..."
 python -c "
@@ -62,14 +128,36 @@ import os
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'afyaflow_auth.settings')
 import django
 django.setup()
-from users.models import User
+from users.models import User, UserRole
+from users.role_management import RoleManager
+
 if not User.objects.filter(email='admin@example.com').exists():
     print('Creating admin user...')
-    User.objects.create_superuser('admin@example.com', 'adminpassword123')
-    print('Admin user created!')
+    admin_user = User.objects.create_superuser('admin@example.com', 'adminpassword123')
+
+    # Assign ADMIN role to the admin user
+    try:
+        role_manager = RoleManager(admin_user)
+        role_manager.assign_role('ADMIN', reason='Initial admin user setup')
+        print('✅ Admin user created and ADMIN role assigned!')
+    except Exception as e:
+        print(f'⚠️ Admin user created but role assignment failed: {e}')
 else:
-    print('Admin user already exists')
+    print('ℹ️ Admin user already exists')
 "
+
+# Enhanced Authentication System Status
+echo "==== ENHANCED AUTHENTICATION STATUS ===="
+echo "CLIENT_AUTH_ENABLED: ${CLIENT_AUTH_ENABLED:-false}"
+echo "SECURITY_MONITORING_ENABLED: ${SECURITY_MONITORING_ENABLED:-false}"
+echo "CLIENT_RATE_LIMITING_ENABLED: ${CLIENT_RATE_LIMITING_ENABLED:-false}"
+echo "EMAIL_SERVICE_URL: ${EMAIL_SERVICE_URL:-not set}"
+if [ -n "$REDIS_URL" ]; then
+  echo "REDIS_URL: configured (using Redis cache)"
+else
+  echo "REDIS_URL: not set (using database cache)"
+fi
+echo "=========================================="
 
 # Determine the port number (default to 8000 if not provided)
 PORT=${PORT:-8000}

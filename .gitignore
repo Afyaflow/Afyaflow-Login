@@ -69,3 +69,17 @@ SECURITY_IMPLEMENTATION_SUMMARY.md
 test_graphql_endpoint.py
 SECURITY_VULNERABILITY_REPORT.md
 
+Afyaflow_Auth_Service_PRD.md
+Afyaflow_Comprehensive_Auth_Service_PRD.md
+Afyaflow_Role_Based_Authentication_Strategy.md
+Afyaflow_Auth_Service_PRD.md
+Afyaflow_Comprehensive_Auth_Service_PRD.md
+Afyaflow_Role_Based_Authentication_Strategy.md
+Afyaflow_Enhanced_Authentication_Service_PRD.md
+Afyaflow_Role_Based_Authentication_Strategy.md
+Afyaflow_Comprehensive_Auth_Service_PRD.md
+Afyaflow_Auth_Service_PRD.md
+
+tests.py
+tests_client_auth.py
+.gitignore

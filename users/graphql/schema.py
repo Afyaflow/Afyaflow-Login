@@ -41,6 +41,14 @@ from .mutations.verification import (
     VerifyEmailMutation,
     ResendVerificationEmailMutation,
 )
+from .mutations.role_auth import (
+    InitiatePatientAuthMutation,
+    CompletePatientAuthMutation,
+    ProviderLoginMutation,
+    AdminLoginMutation,
+    AssignUserRoleMutation,
+    RemoveUserRoleMutation,
+)
 
 # Then import queries
 from .queries import UserQuery
@@ -91,6 +99,14 @@ class UserMutation(graphene.ObjectType):
     update_phone_number = UpdatePhoneNumberMutation.Field(description="Updates the user's phone number and sends a verification code.")
     remove_phone_number = RemovePhoneNumberMutation.Field(description="Removes the user's phone number and disables SMS MFA.")
     resend_phone_verification = ResendPhoneVerificationMutation.Field(description="Resends the phone verification OTP.")
+
+    # Enhanced Role-Based Authentication
+    initiate_patient_auth = InitiatePatientAuthMutation.Field(description="Initiate passwordless authentication for patients")
+    complete_patient_auth = CompletePatientAuthMutation.Field(description="Complete passwordless authentication for patients with OTP")
+    provider_login = ProviderLoginMutation.Field(description="Enhanced provider login with mandatory TOTP")
+    admin_login = AdminLoginMutation.Field(description="Enhanced admin login with strict security requirements")
+    assign_user_role = AssignUserRoleMutation.Field(description="Assign a role to a user (admin only)")
+    remove_user_role = RemoveUserRoleMutation.Field(description="Remove a role from a user (admin only)")
 
 
 # Build the federated schema

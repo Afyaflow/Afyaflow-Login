@@ -7,14 +7,15 @@ from jose import jwt, JWTError
 from rest_framework import authentication
 from rest_framework.exceptions import AuthenticationFailed
 
-from users.models import User
+from users.models import User, RegisteredClient
+from users.client_jwt import ClientJWTAuthenticationBackend
 
 
 class JWTAuthentication(authentication.BaseAuthentication):
     def authenticate(self, request) -> Optional[Tuple[User, dict]]:
         # Get the Authorization header
         auth_header = request.headers.get('Authorization')
-        
+
         if not auth_header:
             return None
 
@@ -24,7 +25,15 @@ class JWTAuthentication(authentication.BaseAuthentication):
             if auth_type.lower() != 'bearer':
                 return None
 
-            # Decode and validate the token
+            # Try client-specific authentication first if client is available
+            if hasattr(request, 'client') and request.client:
+                auth_result = ClientJWTAuthenticationBackend.authenticate_token(token, request.client)
+                if auth_result:
+                    return auth_result['user'], auth_result['payload']
+                else:
+                    raise AuthenticationFailed('Invalid or expired token')
+
+            # Fallback to legacy JWT authentication
             payload = jwt.decode(
                 token,
                 settings.JWT_SECRET_KEY,

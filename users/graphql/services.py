@@ -2,8 +2,9 @@ import logging
 import requests
 from django.conf import settings
 from django.utils import timezone
-from ..models import User, RefreshToken
+from ..models import User, RefreshToken, RegisteredClient
 from ..authentication import create_token, create_oct_token
+from ..client_jwt import ClientJWTAuthenticationBackend
 from datetime import timedelta
 
 # Initialize logger
@@ -187,16 +188,17 @@ def _claim_pending_invitations(user: User):
         logger.error(f"Failed to claim pending invitations for user {user.email}. Error: {response_data.get('errors')}")
 
 
-def create_auth_payload(user, mfa_required=False, mfa_token=None, enabled_mfa_methods=None):
+def create_auth_payload(user, mfa_required=False, mfa_token=None, enabled_mfa_methods=None, client=None, device_fingerprint=None):
     """
     Generates the authentication payload for a user.
     Includes access and refresh tokens unless an MFA step is explicitly required.
+    Supports client-specific JWT tokens when client is provided.
     """
     from ..graphql.types import OrganizationMembershipType # Lazy import to avoid circular dependency
-    
+
     # 1. Get organization memberships
     organization_memberships_data = get_user_organization_memberships(user.id)
-    
+
     # 2. Base payload
     payload = {
         "user": user,
@@ -210,20 +212,41 @@ def create_auth_payload(user, mfa_required=False, mfa_token=None, enabled_mfa_me
 
     # 3. If MFA is not required, generate and add tokens
     if not mfa_required:
-        # Create access token
-        access_token_str, _ = create_token(user.id, token_type='access')
-        
-        # Create and store refresh token
-        refresh_token_str, refresh_expires_at = create_token(user.id, token_type='refresh')
-        
-        # Store the refresh token in the database
-        RefreshToken.objects.create(
-            user=user,
-            token=refresh_token_str,
-            expires_at=refresh_expires_at
-        )
+        if client:
+            # Use client-specific JWT tokens
+            token_pair = ClientJWTAuthenticationBackend.create_token_pair(
+                user, client, device_fingerprint
+            )
 
-        payload["access_token"] = access_token_str
-        payload["refresh_token"] = refresh_token_str
+            # Store the refresh token in the database with client context
+            refresh_expires_at = timezone.now() + timedelta(minutes=client.token_lifetime_refresh)
+            RefreshToken.objects.create(
+                user=user,
+                token=token_pair['refresh_token'],
+                expires_at=refresh_expires_at,
+                client=client,
+                client_type=client.client_type,
+                device_fingerprint=device_fingerprint
+            )
+
+            payload["access_token"] = token_pair['access_token']
+            payload["refresh_token"] = token_pair['refresh_token']
+            payload["token_type"] = token_pair['token_type']
+            payload["expires_in"] = token_pair['expires_in']
+
+        else:
+            # Fallback to legacy token creation
+            access_token_str, _ = create_token(user.id, token_type='access')
+            refresh_token_str, refresh_expires_at = create_token(user.id, token_type='refresh')
+
+            # Store the refresh token in the database
+            RefreshToken.objects.create(
+                user=user,
+                token=refresh_token_str,
+                expires_at=refresh_expires_at
+            )
+
+            payload["access_token"] = access_token_str
+            payload["refresh_token"] = refresh_token_str
 
     return payload
