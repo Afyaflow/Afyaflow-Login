@@ -148,6 +148,58 @@ else:
 echo "Loading service accounts..."
 python manage.py load_service_accounts --force || echo "Service account loading skipped"
 
+# Create initial operations user if configured
+if [ ! -z "$INITIAL_OPS_EMAIL" ] && [ ! -z "$INITIAL_OPS_PASSWORD" ]; then
+    echo "Creating initial operations user..."
+    python -c "
+import os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'afyaflow_auth.settings')
+import django
+django.setup()
+from users.models import User, UserRole, UserRoleAssignment
+
+ops_email = os.getenv('INITIAL_OPS_EMAIL')
+ops_password = os.getenv('INITIAL_OPS_PASSWORD')
+
+# Check if operations user already exists
+if User.objects.filter(email=ops_email).exists():
+    print(f'ℹ️ Operations user {ops_email} already exists')
+else:
+    # Get OPERATIONS role
+    try:
+        operations_role = UserRole.objects.get(name='OPERATIONS')
+
+        # Create operations user
+        ops_user = User.objects.create_user(
+            email=ops_email,
+            password=ops_password,
+            first_name='Operations',
+            last_name='Admin',
+            is_active=True
+        )
+
+        # Assign OPERATIONS role
+        UserRoleAssignment.objects.create(
+            user=ops_user,
+            role=operations_role,
+            is_active=True
+        )
+
+        # Set primary role
+        ops_user.primary_role = operations_role
+        ops_user.save()
+
+        print(f'✅ Created operations user: {ops_email}')
+
+    except UserRole.DoesNotExist:
+        print('❌ OPERATIONS role not found. Cannot create operations user.')
+    except Exception as e:
+        print(f'❌ Error creating operations user: {str(e)}')
+"
+else
+    echo "No INITIAL_OPS_EMAIL or INITIAL_OPS_PASSWORD configured, skipping operations user creation"
+fi
+
 # Create a test admin user if it doesn't exist
 echo "Checking if we need to create a test admin user..."
 python -c "
