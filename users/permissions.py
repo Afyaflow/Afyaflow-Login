@@ -2,9 +2,10 @@ import logging
 from typing import List, Dict, Any, Optional, Union
 from functools import wraps
 from django.core.exceptions import PermissionDenied
+from django.core.cache import cache
 from graphql import GraphQLError
 
-from .models import User, UserRole
+from .models import User, UserRole, ServiceAccount
 
 logger = logging.getLogger(__name__)
 
@@ -474,5 +475,212 @@ def graphql_require_role(role_name: str):
                 )
             
             return func(cls, root, info, *args, **kwargs)
+        return wrapper
+    return decorator
+
+
+class ServicePermissionChecker:
+    """
+    Permission checker for service accounts with enhanced capabilities.
+    """
+
+    # Cache timeout for permission checks (5 minutes)
+    CACHE_TIMEOUT = 300
+
+    # Permission separators and wildcards
+    RESOURCE_SEPARATOR = ':'
+    WILDCARD = '*'
+
+    def __init__(self, service_account: ServiceAccount):
+        self.service_account = service_account
+
+    def has_permission(self, permission: str, resource_id: str = None) -> bool:
+        """
+        Check if service account has a specific permission.
+
+        Args:
+            permission (str): Permission to check (e.g., 'read:patients')
+            resource_id (str, optional): Specific resource ID for fine-grained control
+
+        Returns:
+            bool: True if service account has permission
+        """
+        if not self.service_account or not self.service_account.is_active:
+            return False
+
+        return self._has_permission(self.service_account.permissions, permission, resource_id)
+
+    def _has_permission(self, available_permissions: List[str], required_permission: str,
+                       resource_id: str = None) -> bool:
+        """
+        Check if a required permission is available in the list.
+        Supports wildcards and resource-specific permissions.
+        """
+        if not available_permissions:
+            return False
+
+        # Direct match
+        if required_permission in available_permissions:
+            return True
+
+        # Check for wildcard permissions
+        for available_perm in available_permissions:
+            if self._permission_matches(available_perm, required_permission, resource_id):
+                return True
+
+        return False
+
+    def _permission_matches(self, available_perm: str, required_perm: str, resource_id: str = None) -> bool:
+        """
+        Check if an available permission matches a required permission.
+        Supports various wildcard patterns and resource-specific matching.
+        """
+        # Exact match
+        if available_perm == required_perm:
+            return True
+
+        # Global wildcard
+        if available_perm == self.WILDCARD:
+            return True
+
+        # Parse permissions
+        available_parts = available_perm.split(self.RESOURCE_SEPARATOR)
+        required_parts = required_perm.split(self.RESOURCE_SEPARATOR)
+
+        if len(available_parts) == 2 and len(required_parts) == 2:
+            # Standard resource:action format
+            return self._match_resource_action(available_parts, required_parts)
+
+        return False
+
+    def _match_resource_action(self, available_parts: List[str], required_parts: List[str]) -> bool:
+        """Match resource:action permission format."""
+        available_resource, available_action = available_parts
+        required_resource, required_action = required_parts
+
+        # Check resource match
+        resource_match = (
+            available_resource == self.WILDCARD or
+            available_resource == required_resource or
+            self._match_permission_part(available_resource, required_resource)
+        )
+
+        # Check action match
+        action_match = (
+            available_action == self.WILDCARD or
+            available_action == required_action or
+            self._match_permission_part(available_action, required_action)
+        )
+
+        return resource_match and action_match
+
+    def _match_permission_part(self, available_part: str, required_part: str) -> bool:
+        """Match individual permission parts with wildcard support."""
+        if available_part == self.WILDCARD:
+            return True
+
+        if available_part == required_part:
+            return True
+
+        # Pattern matching (e.g., 'patient_*' matches 'patient_123')
+        if self.WILDCARD in available_part:
+            pattern = available_part.replace(self.WILDCARD, '.*')
+            import re
+            return bool(re.match(f'^{pattern}$', required_part))
+
+        return False
+
+    def get_all_permissions(self) -> List[str]:
+        """Get all permissions for this service account."""
+        if self.service_account and self.service_account.is_active:
+            return self.service_account.permissions
+        return []
+
+    def has_any_permission(self, permissions: List[str]) -> bool:
+        """Check if service account has any of the specified permissions."""
+        return any(self.has_permission(perm) for perm in permissions)
+
+    def require_permission(self, permission: str, resource_id: str = None):
+        """Require a specific permission, raise error if not available."""
+        if not self.has_permission(permission, resource_id):
+            raise PermissionError(f"Service permission required: {permission}")
+
+
+def require_service_permission(permission: str, resource_id: str = None):
+    """
+    Decorator to require a specific service permission for GraphQL resolvers.
+
+    Args:
+        permission (str): Required permission
+        resource_id (str, optional): Specific resource ID
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Extract info from args (GraphQL resolver pattern)
+            info = None
+            for arg in args:
+                if hasattr(arg, 'context'):
+                    info = arg
+                    break
+
+            if not info:
+                raise GraphQLError("Unable to determine request context")
+
+            request = info.context
+
+            # Check for service authentication
+            if hasattr(request, 'service_account'):
+                service_checker = ServicePermissionChecker(request.service_account)
+                if not service_checker.has_permission(permission, resource_id):
+                    raise GraphQLError(f"Service permission required: {permission}")
+            else:
+                raise GraphQLError("Service authentication required")
+
+            return func(*args, **kwargs)
+
+        return wrapper
+    return decorator
+
+
+def check_service_or_user_permission(permission: str, resource_id: str = None):
+    """
+    Decorator that allows either service account or user permission.
+
+    Args:
+        permission (str): Required permission
+        resource_id (str, optional): Specific resource ID
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Extract info from args
+            info = None
+            for arg in args:
+                if hasattr(arg, 'context'):
+                    info = arg
+                    break
+
+            if not info:
+                raise GraphQLError("Unable to determine request context")
+
+            request = info.context
+            has_permission = False
+
+            # Check service account permission
+            if hasattr(request, 'service_account'):
+                service_checker = ServicePermissionChecker(request.service_account)
+                has_permission = service_checker.has_permission(permission, resource_id)
+
+            # Check user permission if service permission not available
+            if not has_permission and hasattr(request, 'user') and request.user.is_authenticated:
+                user_checker = PermissionChecker(request.user)
+                has_permission = user_checker.has_permission(permission)
+
+            if not has_permission:
+                raise GraphQLError(f"Permission required: {permission}")
+
+            return func(*args, **kwargs)
+
         return wrapper
     return decorator

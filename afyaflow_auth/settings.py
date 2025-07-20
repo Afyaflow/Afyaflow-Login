@@ -154,11 +154,11 @@ if REDIS_URL:
         }
     }
 else:
-    # Fallback to database cache
+    # Fallback to in-memory cache for development/testing
     CACHES = {
         'default': {
-            'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
-            'LOCATION': 'auth_cache_table',
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'unique-snowflake',
             'TIMEOUT': 300,
         }
     }
@@ -332,6 +332,58 @@ if not JWT_SECRET_KEY:
     import secrets
     JWT_SECRET_KEY = secrets.token_urlsafe(64)
     logger.warning("JWT_SECRET_KEY not set in environment. Generated temporary key. Set JWT_SECRET_KEY for production!")
+
+# Gateway-Compliant JWT Secrets (User-type-specific)
+PROVIDER_AUTH_TOKEN_SECRET = os.getenv('PROVIDER_AUTH_TOKEN_SECRET')
+PATIENT_AUTH_TOKEN_SECRET = os.getenv('PATIENT_AUTH_TOKEN_SECRET')
+OPERATIONS_AUTH_TOKEN_SECRET = os.getenv('OPERATIONS_AUTH_TOKEN_SECRET')
+ORG_CONTEXT_TOKEN_SECRET = os.getenv('ORG_CONTEXT_TOKEN_SECRET')
+
+# Generate temporary secrets if not set (for development only)
+if not PROVIDER_AUTH_TOKEN_SECRET:
+    import secrets
+    PROVIDER_AUTH_TOKEN_SECRET = secrets.token_urlsafe(64)
+    logger.warning("PROVIDER_AUTH_TOKEN_SECRET not set. Generated temporary key. Set for production!")
+
+if not PATIENT_AUTH_TOKEN_SECRET:
+    import secrets
+    PATIENT_AUTH_TOKEN_SECRET = secrets.token_urlsafe(64)
+    logger.warning("PATIENT_AUTH_TOKEN_SECRET not set. Generated temporary key. Set for production!")
+
+if not OPERATIONS_AUTH_TOKEN_SECRET:
+    import secrets
+    OPERATIONS_AUTH_TOKEN_SECRET = secrets.token_urlsafe(64)
+    logger.warning("OPERATIONS_AUTH_TOKEN_SECRET not set. Generated temporary key. Set for production!")
+
+if not ORG_CONTEXT_TOKEN_SECRET:
+    import secrets
+    ORG_CONTEXT_TOKEN_SECRET = secrets.token_urlsafe(64)
+    logger.warning("ORG_CONTEXT_TOKEN_SECRET not set. Generated temporary key. Set for production!")
+
+# User-type-specific token lifetimes (in minutes)
+PROVIDER_TOKEN_LIFETIME = int(os.getenv('PROVIDER_TOKEN_LIFETIME', '15'))  # 15 minutes for security
+PATIENT_TOKEN_LIFETIME = int(os.getenv('PATIENT_TOKEN_LIFETIME', '60'))   # 1 hour for convenience
+OPERATIONS_TOKEN_LIFETIME = int(os.getenv('OPERATIONS_TOKEN_LIFETIME', '15'))  # 15 minutes for security
+OCT_TOKEN_LIFETIME = int(os.getenv('OCT_TOKEN_LIFETIME', '15'))  # 15 minutes for organization context
+
+# Service Account Configuration
+SERVICE_ACCOUNT_IDS = [id.strip() for id in os.getenv('SERVICE_ACCOUNT_IDS', '').split(',') if id.strip()]
+
+# Load service account configurations dynamically
+SERVICE_ACCOUNT_CONFIGS = {}
+for service_id in SERVICE_ACCOUNT_IDS:
+    # Normalize service ID for environment variable names
+    normalized_id = service_id.upper().replace('-', '_').replace('.', '_')
+
+    service_type = os.getenv(f'SERVICE_ACCOUNT_{normalized_id}_TYPE')
+    permissions_str = os.getenv(f'SERVICE_ACCOUNT_{normalized_id}_PERMISSIONS', '')
+
+    if service_type:
+        permissions = [p.strip() for p in permissions_str.split(',') if p.strip()]
+        SERVICE_ACCOUNT_CONFIGS[service_id] = {
+            'service_type': service_type,
+            'permissions': permissions
+        }
 
 # Session Security Enhancement
 SESSION_COOKIE_HTTPONLY = True

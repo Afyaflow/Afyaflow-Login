@@ -47,6 +47,29 @@ from .mutations.role_auth import (
     ProviderLoginMutation,
     # AdminLoginMutation, AssignUserRoleMutation, RemoveUserRoleMutation - commented out
 )
+from .mutations.operations import (
+    CreateOperationsUserMutation,
+    CreateServiceAccountMutation,
+    UpdateServiceAccountMutation,
+    DeleteServiceAccountMutation,
+    LoadServiceAccountsFromEnvironmentMutation,
+)
+from .mutations.oct import (
+    CreateOrganizationContextMutation,
+    GetOrganizationContextTokenMutation,
+    UpdateOrganizationContextMutation,
+    ValidateTokensMutation,
+)
+from .mutations.service_auth import (
+    GenerateServiceTokenMutation,
+    ValidateServiceTokenMutation,
+    CreateServiceToServiceTokenMutation,
+    ReloadServiceAccountsMutation,
+    GetServiceLoadStatusMutation,
+    RegisterServiceMutation,
+    ServiceHeartbeatMutation,
+    UnregisterServiceMutation,
+)
 
 # Then import queries
 from .queries import UserQuery
@@ -103,6 +126,31 @@ class UserMutation(graphene.ObjectType):
     complete_patient_auth = CompletePatientAuthMutation.Field(description="Complete passwordless authentication for patients with OTP")
     provider_login = ProviderLoginMutation.Field(description="Enhanced provider login with conditional TOTP")
     # admin_login, assign_user_role, remove_user_role - commented out for now
+
+    # OPERATIONS User and Service Account Management
+    create_operations_user = CreateOperationsUserMutation.Field(description="Create a new OPERATIONS user with system-wide privileges")
+    create_service_account = CreateServiceAccountMutation.Field(description="Create a new service account for inter-service authentication")
+    update_service_account = UpdateServiceAccountMutation.Field(description="Update an existing service account")
+    delete_service_account = DeleteServiceAccountMutation.Field(description="Delete a service account")
+    load_service_accounts_from_environment = LoadServiceAccountsFromEnvironmentMutation.Field(description="Load service accounts from environment variables")
+
+    # Organization Context Token (OCT) Management
+    create_organization_context = CreateOrganizationContextMutation.Field(description="Create a new organization context for OCT generation")
+    get_organization_context_token = GetOrganizationContextTokenMutation.Field(description="Generate an Organization Context Token (OCT) for a provider")
+    update_organization_context = UpdateOrganizationContextMutation.Field(description="Update an existing organization context")
+    validate_tokens = ValidateTokensMutation.Field(description="Validate auth token and OCT for testing purposes")
+
+    # Service Authentication and Token Management
+    generate_service_token = GenerateServiceTokenMutation.Field(description="Generate a service authentication token")
+    validate_service_token = ValidateServiceTokenMutation.Field(description="Validate a service authentication token")
+    create_service_to_service_token = CreateServiceToServiceTokenMutation.Field(description="Create a token for service-to-service communication")
+    reload_service_accounts = ReloadServiceAccountsMutation.Field(description="Reload service accounts from environment variables")
+    get_service_load_status = GetServiceLoadStatusMutation.Field(description="Get current service account load status")
+
+    # Service Discovery and Registry
+    register_service = RegisterServiceMutation.Field(description="Register a service in the service registry")
+    service_heartbeat = ServiceHeartbeatMutation.Field(description="Send a heartbeat from a service")
+    unregister_service = UnregisterServiceMutation.Field(description="Unregister a service from the registry")
 
 
 # Build the federated schema

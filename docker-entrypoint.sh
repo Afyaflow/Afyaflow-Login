@@ -121,6 +121,33 @@ for role_data in roles:
 print('User roles setup completed!')
 "
 
+# Setup OPERATIONS role for GraphQL Gateway compliance
+echo "Setting up OPERATIONS role..."
+python -c "
+import os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'afyaflow_auth.settings')
+import django
+django.setup()
+from users.models import UserRole
+
+operations_role, created = UserRole.objects.get_or_create(
+    name='OPERATIONS',
+    defaults={
+        'description': 'Operations team role for system administration',
+        'permissions': ['admin:*', 'read:*', 'write:*', 'manage:users', 'manage:services'],
+        'is_active': True
+    }
+)
+if created:
+    print('✅ Created OPERATIONS role')
+else:
+    print('ℹ️ OPERATIONS role already exists')
+"
+
+# Load service accounts from environment
+echo "Loading service accounts..."
+python manage.py load_service_accounts --force || echo "Service account loading skipped"
+
 # Create a test admin user if it doesn't exist
 echo "Checking if we need to create a test admin user..."
 python -c "

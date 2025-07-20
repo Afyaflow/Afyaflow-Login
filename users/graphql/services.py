@@ -188,13 +188,14 @@ def _claim_pending_invitations(user: User):
         logger.error(f"Failed to claim pending invitations for user {user.email}. Error: {response_data.get('errors')}")
 
 
-def create_auth_payload(user, mfa_required=False, mfa_token=None, enabled_mfa_methods=None, client=None, device_fingerprint=None):
+def create_auth_payload(user, mfa_required=False, mfa_token=None, enabled_mfa_methods=None, client=None, device_fingerprint=None, organization_context=None):
     """
     Generates the authentication payload for a user.
     Includes access and refresh tokens unless an MFA step is explicitly required.
-    Supports client-specific JWT tokens when client is provided.
+    Supports both legacy and gateway-compliant JWT tokens based on client migration status.
     """
     from ..graphql.types import OrganizationMembershipType # Lazy import to avoid circular dependency
+    from ..dual_jwt import DualJWTManager
 
     # 1. Get organization memberships
     organization_memberships_data = get_user_organization_memberships(user.id)
@@ -213,26 +214,50 @@ def create_auth_payload(user, mfa_required=False, mfa_token=None, enabled_mfa_me
     # 3. If MFA is not required, generate and add tokens
     if not mfa_required:
         if client:
-            # Use client-specific JWT tokens
-            token_pair = ClientJWTAuthenticationBackend.create_token_pair(
-                user, client, device_fingerprint
-            )
-
-            # Store the refresh token in the database with client context
-            refresh_expires_at = timezone.now() + timedelta(minutes=client.token_lifetime_refresh)
-            RefreshToken.objects.create(
-                user=user,
-                token=token_pair['refresh_token'],
-                expires_at=refresh_expires_at,
-                client=client,
-                client_type=client.client_type,
+            # Use dual JWT manager for migration support
+            dual_manager = DualJWTManager(client)
+            token_data = dual_manager.create_tokens(
+                user,
+                organization_context=organization_context,
                 device_fingerprint=device_fingerprint
             )
 
-            payload["access_token"] = token_pair['access_token']
-            payload["refresh_token"] = token_pair['refresh_token']
-            payload["token_type"] = token_pair['token_type']
-            payload["expires_in"] = token_pair['expires_in']
+            # Store refresh token if present (legacy format)
+            if 'legacy_refresh_token' in token_data:
+                refresh_expires_at = timezone.now() + timedelta(minutes=client.token_lifetime_refresh)
+                RefreshToken.objects.create(
+                    user=user,
+                    token=token_data['legacy_refresh_token'],
+                    expires_at=refresh_expires_at,
+                    client=client,
+                    client_type=client.client_type,
+                    device_fingerprint=device_fingerprint
+                )
+
+            # Add all token data to payload
+            payload.update({
+                "access_token": token_data['access_token'],
+                "token_type": token_data['token_type'],
+                "expires_in": token_data['expires_in'],
+                "token_format": token_data['format'],
+            })
+
+            # Add optional fields
+            if 'refresh_token' in token_data:
+                payload["refresh_token"] = token_data['refresh_token']
+            if 'legacy_access_token' in token_data:
+                payload["legacy_access_token"] = token_data['legacy_access_token']
+            if 'legacy_refresh_token' in token_data:
+                payload["legacy_refresh_token"] = token_data['legacy_refresh_token']
+            if 'org_context_token' in token_data:
+                payload["org_context_token"] = token_data['org_context_token']
+            if 'user_type' in token_data:
+                payload["user_type"] = token_data['user_type']
+
+            # Add deprecation warning if applicable
+            deprecation_warning = dual_manager.get_deprecation_warning()
+            if deprecation_warning:
+                payload["deprecation_warning"] = deprecation_warning
 
         else:
             # Fallback to legacy token creation
@@ -248,5 +273,6 @@ def create_auth_payload(user, mfa_required=False, mfa_token=None, enabled_mfa_me
 
             payload["access_token"] = access_token_str
             payload["refresh_token"] = refresh_token_str
+            payload["token_format"] = "legacy_fallback"
 
     return payload

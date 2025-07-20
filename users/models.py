@@ -83,6 +83,17 @@ class UserRole(models.Model):
                 'view_system_logs',
                 'manage_system_settings',
                 'access_admin_interface'
+            ],
+            'OPERATIONS': [
+                'view_all_users',
+                'view_system_logs',
+                'manage_system_settings',
+                'access_admin_interface',
+                'cross_tenant_access',
+                'system_maintenance',
+                'technical_support',
+                'service_account_management',
+                'global_monitoring'
             ]
         }
         return default_permissions.get(role_name, [])
@@ -163,6 +174,27 @@ class RegisteredClient(models.Model):
     enhanced_monitoring = models.BooleanField(
         default=False,
         help_text="Whether enhanced security monitoring is enabled"
+    )
+
+    # Migration support fields
+    supports_new_token_format = models.BooleanField(
+        default=False,
+        help_text="Whether this client supports the new gateway-compliant token format"
+    )
+    legacy_token_support_until = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Date until which legacy tokens will be supported for this client"
+    )
+    migration_status = models.CharField(
+        max_length=20,
+        choices=[
+            ('LEGACY', 'Legacy Only'),
+            ('DUAL', 'Dual Support'),
+            ('NEW', 'New Format Only')
+        ],
+        default='LEGACY',
+        help_text="Current migration status for this client"
     )
 
     class Meta:
@@ -248,6 +280,211 @@ class RegisteredClient(models.Model):
             },
         }
         return policies.get(client_type, {})
+
+
+class ServiceAccount(models.Model):
+    """
+    Service Account for inter-service authentication.
+    Supports dynamic configuration via environment variables.
+    """
+
+    service_id = models.CharField(
+        max_length=100,
+        unique=True,
+        help_text="Unique service identifier (e.g., billing-svc-123abc)"
+    )
+    service_type = models.CharField(
+        max_length=50,
+        help_text="Type of service (e.g., internal-billing, internal-patients)"
+    )
+    permissions = models.JSONField(
+        default=list,
+        help_text="List of permissions for this service (e.g., ['read:billing', 'write:billing'])"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this service account is currently active"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _('service account')
+        verbose_name_plural = _('service accounts')
+        indexes = [
+            models.Index(fields=['service_id']),
+            models.Index(fields=['service_type']),
+            models.Index(fields=['is_active']),
+            models.Index(fields=['created_at']),
+        ]
+        ordering = ['service_id']
+
+    def __str__(self):
+        return f"{self.service_id} ({self.service_type})"
+
+    def clean(self):
+        """Validate service account data."""
+        super().clean()
+        if not self.service_id:
+            raise ValidationError("Service ID is required")
+        if not self.service_type:
+            raise ValidationError("Service type is required")
+
+    @classmethod
+    def load_from_environment(cls):
+        """Load service accounts from environment variables."""
+        from django.conf import settings
+
+        service_ids = getattr(settings, 'SERVICE_ACCOUNT_IDS', [])
+
+        for service_id in service_ids:
+            # Normalize service ID for environment variable names
+            normalized_id = service_id.upper().replace('-', '_').replace('.', '_')
+
+            service_type = getattr(settings, f'SERVICE_ACCOUNT_{normalized_id}_TYPE', None)
+            permissions_str = getattr(settings, f'SERVICE_ACCOUNT_{normalized_id}_PERMISSIONS', '')
+
+            if service_type:
+                permissions = permissions_str.split(',') if permissions_str else []
+                permissions = [p.strip() for p in permissions if p.strip()]
+
+                cls.objects.update_or_create(
+                    service_id=service_id,
+                    defaults={
+                        'service_type': service_type,
+                        'permissions': permissions,
+                        'is_active': True
+                    }
+                )
+
+    def has_permission(self, permission):
+        """Check if service account has a specific permission."""
+        return permission in self.permissions
+
+    def get_permissions_for_resource(self, resource):
+        """Get permissions for a specific resource."""
+        return [p for p in self.permissions if p.startswith(f'{resource}:')]
+
+    @classmethod
+    def load_from_environment_with_counts(cls, force_update=False):
+        """Load service accounts from environment and return counts."""
+        from django.conf import settings
+
+        service_ids = getattr(settings, 'SERVICE_ACCOUNT_IDS', [])
+        created_count = 0
+        updated_count = 0
+
+        for service_id in service_ids:
+            # Normalize service ID for environment variable names
+            normalized_id = service_id.upper().replace('-', '_').replace('.', '_')
+
+            service_type = getattr(settings, f'SERVICE_ACCOUNT_{normalized_id}_TYPE', None)
+            permissions_str = getattr(settings, f'SERVICE_ACCOUNT_{normalized_id}_PERMISSIONS', '')
+
+            if service_type:
+                permissions = permissions_str.split(',') if permissions_str else []
+                permissions = [p.strip() for p in permissions if p.strip()]
+
+                service_account, created = cls.objects.update_or_create(
+                    service_id=service_id,
+                    defaults={
+                        'service_type': service_type,
+                        'permissions': permissions,
+                        'is_active': True
+                    }
+                )
+
+                if created:
+                    created_count += 1
+                elif force_update:
+                    updated_count += 1
+
+        return created_count, updated_count
+
+
+class OrganizationContext(models.Model):
+    """
+    Extended organization context for OCT tokens.
+    Supports hierarchical organization structure and service subscriptions.
+    """
+
+    organization_id = models.UUIDField(
+        help_text="Primary organization identifier"
+    )
+    branch_id = models.UUIDField(
+        null=True,
+        blank=True,
+        help_text="Branch identifier within the organization"
+    )
+    cluster_id = models.UUIDField(
+        null=True,
+        blank=True,
+        help_text="Cluster identifier for regional grouping"
+    )
+    subscribed_services = models.JSONField(
+        default=list,
+        help_text="List of services this organization has access to"
+    )
+    organization_permissions = models.JSONField(
+        default=dict,
+        help_text="Organization-specific permissions mapping"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this organization context is active"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _('organization context')
+        verbose_name_plural = _('organization contexts')
+        indexes = [
+            models.Index(fields=['organization_id']),
+            models.Index(fields=['branch_id']),
+            models.Index(fields=['cluster_id']),
+            models.Index(fields=['is_active']),
+            models.Index(fields=['created_at']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['organization_id', 'branch_id', 'cluster_id'],
+                name='unique_org_branch_cluster'
+            )
+        ]
+        ordering = ['organization_id', 'branch_id', 'cluster_id']
+
+    def __str__(self):
+        parts = [str(self.organization_id)]
+        if self.branch_id:
+            parts.append(f"Branch: {self.branch_id}")
+        if self.cluster_id:
+            parts.append(f"Cluster: {self.cluster_id}")
+        return " | ".join(parts)
+
+    def clean(self):
+        """Validate organization context data."""
+        super().clean()
+        if not self.organization_id:
+            raise ValidationError("Organization ID is required")
+
+    def get_full_context(self):
+        """Get complete organization context for OCT token."""
+        return {
+            'orgId': str(self.organization_id),
+            'branchId': str(self.branch_id) if self.branch_id else None,
+            'clusterId': str(self.cluster_id) if self.cluster_id else None,
+            'permissions': self.organization_permissions,
+            'subscribedServices': self.subscribed_services
+        }
+
+    def has_service_access(self, service_name):
+        """Check if organization has access to a specific service."""
+        return service_name in self.subscribed_services
+
+    def get_service_permissions(self, service_name):
+        """Get permissions for a specific service."""
+        return self.organization_permissions.get(service_name, [])
 
 
 class UserRoleAssignment(models.Model):
@@ -471,6 +708,10 @@ class User(AbstractUser):
         """Check if user has ADMIN role."""
         return self.has_role('ADMIN')
 
+    def is_operations_user(self):
+        """Check if user has OPERATIONS role."""
+        return self.has_role('OPERATIONS')
+
     def get_primary_role_name(self):
         """Get the name of the primary role."""
         return self.primary_role.name if self.primary_role else None
@@ -518,6 +759,8 @@ class User(AbstractUser):
             return True
         if self.is_admin_user():
             return True
+        if self.is_operations_user():
+            return True  # Operations users always require TOTP for security
         return False
 
     def get_token_lifetime_for_client(self, client_type, token_type='access'):
@@ -537,6 +780,11 @@ class User(AbstractUser):
                 return 15  # 15 minutes
             else:  # refresh
                 return 1440  # 1 day
+        elif self.is_operations_user():
+            if token_type == 'access':
+                return 15  # 15 minutes (same as admin for security)
+            else:  # refresh
+                return 1440  # 1 day (same as admin for security)
 
         # Default fallback
         return 60 if token_type == 'access' else 10080

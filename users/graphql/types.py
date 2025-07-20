@@ -1,6 +1,6 @@
 import graphene
 from graphene_django import DjangoObjectType
-from ..models import User
+from ..models import User, ServiceAccount, OrganizationContext
 
 class UserType(DjangoObjectType):
     """GraphQL type for the User model, representing a healthcare professional or system user."""
@@ -77,11 +77,12 @@ class AuthPayloadType(graphene.ObjectType):
     Payload returned after a login or registration attempt.
     If MFA is not required, tokens will be provided.
     If MFA is required, the 'mfaRequired' flag will be true, and the client must complete the second step.
+    Enhanced to support both legacy and gateway-compliant token formats.
     """
     user = graphene.Field(UserType, description="The authenticated user object.")
     access_token = graphene.String(name="accessToken", required=False, description="JWT access token. Null if MFA is required.")
     refresh_token = graphene.String(name="refreshToken", required=False, description="JWT refresh token. Null if MFA is required.")
-    
+
     # New fields for MFA Flow Control
     mfa_required = graphene.Boolean(name="mfaRequired", description="True if an MFA step is required to complete login.")
     mfa_token = graphene.String(name="mfaToken", required=False, description="A short-lived token to use in the verifyMfa mutation. Provided only when MFA is required.")
@@ -89,6 +90,22 @@ class AuthPayloadType(graphene.ObjectType):
 
     organization_memberships = graphene.List(OrganizationMembershipType, name="organizationMemberships", required=False, description="A list of organizations the user is a member of.")
     errors = graphene.List(graphene.String, description="List of error messages if any operation within the mutation fails.")
+
+    # Gateway-compliant token fields
+    token_type = graphene.String(name="tokenType", required=False, description="Token type (e.g., 'Bearer')")
+    expires_in = graphene.Int(name="expiresIn", required=False, description="Token expiration time in seconds")
+    token_format = graphene.String(name="tokenFormat", required=False, description="Token format: 'legacy', 'gateway_compliant', or 'dual'")
+    user_type = graphene.String(name="userType", required=False, description="User type: 'patient', 'provider', or 'operations'")
+
+    # Organization Context Token for providers
+    org_context_token = graphene.String(name="orgContextToken", required=False, description="Organization Context Token (OCT) for providers")
+
+    # Legacy token support during migration
+    legacy_access_token = graphene.String(name="legacyAccessToken", required=False, description="Legacy format access token for backward compatibility")
+    legacy_refresh_token = graphene.String(name="legacyRefreshToken", required=False, description="Legacy format refresh token for backward compatibility")
+
+    # Migration support
+    deprecation_warning = graphene.String(name="deprecationWarning", required=False, description="Warning message about deprecated token format")
 
 class MfaChallengeType(graphene.ObjectType):
     """DEPRECATED: This will be removed in favor of the enhanced AuthPayloadType."""
@@ -107,3 +124,34 @@ class GetScopedAccessTokenPayload(graphene.Union):
         types = (ScopedAuthPayload,)
         # In the future, we can add custom error types here.
         # e.g. types = (ScopedAuthPayload, PermissionsError, InvalidOrganizationError)
+
+
+class ServiceAccountType(DjangoObjectType):
+    """GraphQL type for the ServiceAccount model."""
+
+    class Meta:
+        model = ServiceAccount
+        fields = (
+            "id", "service_id", "service_type", "permissions",
+            "is_active", "created_at", "updated_at"
+        )
+        description = "Represents a service account for inter-service authentication."
+
+
+class OrganizationContextType(DjangoObjectType):
+    """GraphQL type for the OrganizationContext model."""
+
+    full_context = graphene.JSONString(description="Complete organization context for OCT token")
+
+    def resolve_full_context(self, info):
+        """Return the full organization context."""
+        return self.get_full_context()
+
+    class Meta:
+        model = OrganizationContext
+        fields = (
+            "id", "organization_id", "branch_id", "cluster_id",
+            "subscribed_services", "organization_permissions",
+            "is_active", "created_at", "updated_at", "full_context"
+        )
+        description = "Represents organization context for OCT tokens."

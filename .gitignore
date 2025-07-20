@@ -83,3 +83,19 @@ Afyaflow_Auth_Service_PRD.md
 tests.py
 tests_client_auth.py
 .gitignore
+
+*.env.*
+afyaflow graphql changes prd.md
+Afyaflow GraphQL Gateway_ Authentication & Authorization Developer Guide.md
+auto_cleanup.py
+cleanup_plan.md
+final_validation_report.json
+PROJECT_COMPLETION_REPORT.md
+test*
+Deployment_guide.md
+api_reference.md
+client_migration_guide.md
+system_overview.md
+cleanup_legacy_code.py
+social_login_analysis_and_refactoring_strategy.md
+
