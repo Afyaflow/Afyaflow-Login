@@ -38,8 +38,8 @@ class RegisterMutation(graphene.Mutation):
         password_confirm = graphene.String(required=True)
         first_name = graphene.String(required=True)
         last_name = graphene.String(required=True)
-        client_id = graphene.String(required=True, description="Client ID for authentication")
-        client_api_key = graphene.String(required=True, description="Client API key for authentication")
+        client_id = graphene.String(description="Client ID for authentication (optional when CLIENT_AUTH_ENABLED=false)")
+        client_api_key = graphene.String(description="Client API key for authentication (optional when CLIENT_AUTH_ENABLED=false)")
 
     auth_payload = graphene.Field(AuthPayloadType)
     errors = graphene.List(graphene.String)
@@ -47,7 +47,7 @@ class RegisterMutation(graphene.Mutation):
     @classmethod
     @require_client_auth(['PROVIDER_WEB', 'PROVIDER_MOBILE'])
     @transaction.atomic
-    def mutate(cls, root, info, email, password, password_confirm, first_name, last_name):
+    def mutate(cls, root, info, email, password, password_confirm, first_name, last_name, client_id=None, client_api_key=None):
         serializer = UserRegistrationSerializer(data={
             'email': email,
             'password': password,
@@ -107,8 +107,8 @@ class LoginMutation(graphene.Mutation):
     class Arguments:
         email = graphene.String(required=True)
         password = graphene.String(required=True)
-        client_id = graphene.String(required=True, description="Client ID for authentication")
-        client_api_key = graphene.String(required=True, description="Client API key for authentication")
+        client_id = graphene.String(description="Client ID for authentication (optional when CLIENT_AUTH_ENABLED=false)")
+        client_api_key = graphene.String(description="Client API key for authentication (optional when CLIENT_AUTH_ENABLED=false)")
 
     auth_payload = graphene.Field(AuthPayloadType)
     errors = graphene.List(graphene.String)
@@ -116,7 +116,7 @@ class LoginMutation(graphene.Mutation):
     @classmethod
     @require_client_auth(['PROVIDER_WEB', 'PROVIDER_MOBILE'])
     @transaction.atomic
-    def mutate(cls, root, info, email, password):
+    def mutate(cls, root, info, email, password, client_id=None, client_api_key=None):
         # Get client information for security tracking
         client_ip = get_client_ip(info.context)
         user_agent = info.context.META.get('HTTP_USER_AGENT', 'Unknown')
@@ -293,15 +293,15 @@ class RefreshTokenMutation(graphene.Mutation):
     """Refreshes a user's access token."""
     class Arguments:
         refresh_token = graphene.String(required=True)
-        client_id = graphene.String(required=True, description="Client ID for authentication")
-        client_api_key = graphene.String(required=True, description="Client API key for authentication")
+        client_id = graphene.String(description="Client ID for authentication (optional when CLIENT_AUTH_ENABLED=false)")
+        client_api_key = graphene.String(description="Client API key for authentication (optional when CLIENT_AUTH_ENABLED=false)")
 
     access_token = graphene.String()
     errors = graphene.List(graphene.String)
 
     @classmethod
     @require_client_auth()
-    def mutate(cls, root, info, refresh_token):
+    def mutate(cls, root, info, refresh_token, client_id=None, client_api_key=None):
         try:
             token_obj = RefreshToken.objects.get(
                 token=refresh_token,
