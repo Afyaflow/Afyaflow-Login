@@ -20,8 +20,8 @@ class InitiatePatientAuthMutation(graphene.Mutation):
     class Arguments:
         email = graphene.String()
         phone_number = graphene.String()
-        client_id = graphene.String(required=True)
-        client_api_key = graphene.String(required=True)
+        client_id = graphene.String()  # Optional when CLIENT_AUTH_ENABLED=false
+        client_api_key = graphene.String()  # Optional when CLIENT_AUTH_ENABLED=false
     
     success = graphene.Boolean()
     message = graphene.String()
@@ -117,8 +117,8 @@ class CompletePatientAuthMutation(graphene.Mutation):
     class Arguments:
         otp_token = graphene.String(required=True)
         otp_code = graphene.String(required=True)
-        client_id = graphene.String(required=True)
-        client_api_key = graphene.String(required=True)
+        client_id = graphene.String()  # Optional when CLIENT_AUTH_ENABLED=false
+        client_api_key = graphene.String()  # Optional when CLIENT_AUTH_ENABLED=false
     
     auth_payload = graphene.Field(AuthPayloadType)
     errors = graphene.List(graphene.String)
@@ -189,8 +189,8 @@ class ProviderLoginMutation(graphene.Mutation):
         email = graphene.String(required=True)
         password = graphene.String(required=True)
         totp_code = graphene.String()
-        client_id = graphene.String(required=True)
-        client_api_key = graphene.String(required=True)
+        client_id = graphene.String()  # Optional when CLIENT_AUTH_ENABLED=false
+        client_api_key = graphene.String()  # Optional when CLIENT_AUTH_ENABLED=false
     
     auth_payload = graphene.Field(AuthPayloadType)
     errors = graphene.List(graphene.String)
@@ -211,7 +211,8 @@ class ProviderLoginMutation(graphene.Mutation):
             
             # Check if TOTP is required and provided
             client = get_client_from_context(info)
-            if user.requires_totp_for_client(client.client_type):
+            client_type = client.client_type if client else 'PROVIDER_WEB'
+            if user.requires_totp_for_client(client_type):
                 if not totp_code:
                     raise GraphQLError("TOTP code required for provider authentication")
                 
@@ -251,8 +252,8 @@ class AdminLoginMutation(graphene.Mutation):
         password = graphene.String(required=True)
         totp_code = graphene.String(required=True)
         device_fingerprint = graphene.String(required=True)
-        client_id = graphene.String(required=True)
-        client_api_key = graphene.String(required=True)
+        client_id = graphene.String()  # Optional when CLIENT_AUTH_ENABLED=false
+        client_api_key = graphene.String()  # Optional when CLIENT_AUTH_ENABLED=false
     
     auth_payload = graphene.Field(AuthPayloadType)
     errors = graphene.List(graphene.String)

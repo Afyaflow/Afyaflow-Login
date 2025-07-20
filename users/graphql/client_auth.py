@@ -22,10 +22,16 @@ def require_client_auth(allowed_client_types=None):
     def decorator(func):
         @functools.wraps(func)
         def wrapper(cls, root, info, *args, **kwargs):
+            # Check if client authentication is enabled
+            from django.conf import settings
+            if not getattr(settings, 'CLIENT_AUTH_ENABLED', False):
+                # If client auth is disabled, just call the function without validation
+                return func(cls, root, info, *args, **kwargs)
+
             # Extract client credentials from arguments
             client_id = kwargs.get('client_id') or kwargs.get('clientId')
             api_key = kwargs.get('client_api_key') or kwargs.get('clientApiKey')
-            
+
             if not client_id or not api_key:
                 raise GraphQLError(
                     "Client authentication required. Please provide clientId and clientApiKey.",

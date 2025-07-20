@@ -31,10 +31,14 @@ class ClientAuthenticationMiddleware(MiddlewareMixin):
         """
         Process incoming requests to validate client authentication.
         """
+        # Check if client authentication is enabled
+        if not getattr(settings, 'CLIENT_AUTH_ENABLED', False):
+            return None
+
         # Skip client authentication for certain paths
         if self._should_skip_client_auth(request):
             return None
-        
+
         # Only process GraphQL requests that require client authentication
         if not self._requires_client_auth(request):
             return None
