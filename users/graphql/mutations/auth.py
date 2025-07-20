@@ -49,20 +49,61 @@ class RegisterMutation(graphene.Mutation):
     @require_client_auth(['PROVIDER_WEB', 'PROVIDER_MOBILE'])
     @transaction.atomic
     def mutate(cls, root, info, email, password, password_confirm, first_name, last_name, client_id=None, client_api_key=None):
-        serializer = UserRegistrationSerializer(data={
-            'email': email,
-            'password': password,
-            'password_confirm': password_confirm,
-            'first_name': first_name,
-            'last_name': last_name
-        })
-        
-        if not serializer.is_valid():
-            errors = [f"{field}: {message}" for field, messages in serializer.errors.items() for message in messages]
-            logger.warning(f"User registration failed for email {email}: {errors}")
-            return RegisterMutation(auth_payload=None, errors=errors)
-        
-        user = serializer.save()
+        # Check if user already exists (dual role scenario)
+        existing_user = None
+        try:
+            existing_user = User.objects.get(email=email)
+            logger.info(f"Found existing user {email} for provider registration (dual role scenario)")
+        except User.DoesNotExist:
+            # Also check for phone-based users who might want to add a real email
+            try:
+                # Look for users with phone-based emails that might match this real email
+                phone_users = User.objects.filter(email__contains='@phone.afyaflow.local')
+                for phone_user in phone_users:
+                    # This is a simplified check - in production you might want more sophisticated matching
+                    if phone_user.phone_number and email.lower().startswith(phone_user.first_name.lower()):
+                        logger.info(f"Potential phone user match found for {email}")
+                        # For now, treat as separate user - can be enhanced later
+                        break
+            except Exception as e:
+                logger.debug(f"Phone user check failed: {e}")
+            pass
+
+        if existing_user:
+            # User exists - this is a dual role scenario
+            # Validate password requirements for existing user
+            if len(password) < 8:
+                return RegisterMutation(auth_payload=None, errors=["password: Ensure this field has at least 8 characters."])
+
+            if password != password_confirm:
+                return RegisterMutation(auth_payload=None, errors=["password_confirm: Passwords do not match."])
+
+            # Update user's password and details if they were passwordless
+            if existing_user.is_passwordless:
+                existing_user.set_password(password)
+                existing_user.is_passwordless = False
+                existing_user.first_name = first_name
+                existing_user.last_name = last_name
+                existing_user.save()
+                logger.info(f"Updated passwordless user {email} with provider credentials")
+
+            user = existing_user
+        else:
+            # New user - standard registration
+            serializer = UserRegistrationSerializer(data={
+                'email': email,
+                'password': password,
+                'password_confirm': password_confirm,
+                'first_name': first_name,
+                'last_name': last_name
+            })
+
+            if not serializer.is_valid():
+                errors = [f"{field}: {message}" for field, messages in serializer.errors.items() for message in messages]
+                logger.warning(f"User registration failed for email {email}: {errors}")
+                return RegisterMutation(auth_payload=None, errors=errors)
+
+            user = serializer.save()
 
         # Automatically assign PROVIDER role for provider registration
         client = get_client_from_context(info)
@@ -79,14 +120,20 @@ class RegisterMutation(graphene.Mutation):
         else:
             logger.info(f"User {user.email} already has PROVIDER role")
 
-        # Create EmailAddress record for allauth consistency
+        # Create EmailAddress record for allauth consistency (if not exists)
         from allauth.account.models import EmailAddress
-        EmailAddress.objects.create(
+        email_address, created = EmailAddress.objects.get_or_create(
             user=user,
             email=user.email,
-            primary=True,
-            verified=False  # Will be verified when user completes email verification
+            defaults={
+                'primary': True,
+                'verified': user.email_verified  # Use existing verification status
+            }
         )
+        if created:
+            logger.info(f"Created EmailAddress record for {user.email}")
+        else:
+            logger.info(f"EmailAddress record already exists for {user.email}")
 
         # Send a verification OTP to the user's email
         try:
