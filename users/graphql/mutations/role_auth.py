@@ -2,16 +2,18 @@ import logging
 import graphene
 from django.db import transaction
 from django.contrib.auth import authenticate
+from django.utils import timezone
 from graphql import GraphQLError
 
 from ..types import AuthPayloadType
 from ..services import create_auth_payload
 from ..client_auth import require_client_auth, get_client_from_context
-from ...models import User, UserRole
+from ...models import User, UserRole, AuthenticationAttempt
 from ...role_management import RoleManager, RoleValidationService
 from ...permissions import graphql_require_role, graphql_require_permission
 from ...otp_utils import generate_otp, set_user_otp, verify_otp
 from ...communication_client import send_templated_email, send_sms
+
 
 logger = logging.getLogger(__name__)
 
@@ -277,7 +279,66 @@ class ProviderLoginMutation(graphene.Mutation):
             )
 
 
+class OperationsLoginMutation(graphene.Mutation):
+    """
+    Operations user login.
+    """
+    class Arguments:
+        email = graphene.String(required=True, description="Operations user email")
+        password = graphene.String(required=True, description="Operations user password")
+
+    auth_payload = graphene.Field(AuthPayloadType)
+    errors = graphene.List(graphene.String)
+
+    @classmethod
+    @transaction.atomic
+    def mutate(cls, root, info, email, password):
+        try:
+            # Authenticate user
+            user = authenticate(email=email, password=password)
+            if not user:
+                return OperationsLoginMutation(
+                    auth_payload=None,
+                    errors=["Invalid email or password"]
+                )
+
+            # Check if user is active
+            if not user.is_active:
+                return OperationsLoginMutation(
+                    auth_payload=None,
+                    errors=["Account is inactive"]
+                )
+
+            # Check if user has OPERATIONS role
+            if not user.is_operations_user():
+                logger.warning(f"Non-operations user attempted operations login: {email}")
+                return OperationsLoginMutation(
+                    auth_payload=None,
+                    errors=["Access denied: Operations role required"]
+                )
+
+            # Update last login
+            user.last_login = timezone.now()
+            user.save(update_fields=['last_login'])
+
+            # Create authentication payload
+            auth_data = create_auth_payload(user)
+
+            logger.info(f"Successful operations login for user: {email}")
+
+            return OperationsLoginMutation(
+                auth_payload=AuthPayloadType(**auth_data),
+                errors=None
+            )
+
+        except Exception as e:
+            logger.error(f"Operations login error: {str(e)}")
+            return OperationsLoginMutation(
+                auth_payload=None,
+                errors=[str(e)]
+            )
+
+
 # COMMENTED OUT: Admin features not needed for now
 # AdminLoginMutation, AssignUserRoleMutation, and RemoveUserRoleMutation
 # have been removed to simplify the authentication system.
-        

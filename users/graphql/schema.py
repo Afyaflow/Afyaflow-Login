@@ -45,6 +45,7 @@ from .mutations.role_auth import (
     InitiatePatientAuthMutation,
     CompletePatientAuthMutation,
     ProviderLoginMutation,
+    OperationsLoginMutation,
     # AdminLoginMutation, AssignUserRoleMutation, RemoveUserRoleMutation - commented out
 )
 from .mutations.operations import (
@@ -125,6 +126,7 @@ class UserMutation(graphene.ObjectType):
     initiate_patient_auth = InitiatePatientAuthMutation.Field(description="Initiate passwordless authentication for patients")
     complete_patient_auth = CompletePatientAuthMutation.Field(description="Complete passwordless authentication for patients with OTP")
     provider_login = ProviderLoginMutation.Field(description="Enhanced provider login with conditional TOTP")
+    operations_login = OperationsLoginMutation.Field(description="Operations user login for system administration")
     # admin_login, assign_user_role, remove_user_role - commented out for now
 
     # OPERATIONS User and Service Account Management
