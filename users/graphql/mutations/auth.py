@@ -16,6 +16,7 @@ from ...authentication import create_token, JWTAuthentication, create_oct_token
 from ...communication_client import send_templated_email, send_sms
 from ...otp_utils import generate_otp, set_user_otp, verify_otp
 from ...security_middleware import auth_attempt_tracker
+from ...role_management import RoleManager
 import pyotp
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,6 @@ class RegisterMutation(graphene.Mutation):
 
         # Automatically assign PROVIDER role for provider registration
         client = get_client_from_context(info)
-        from ..role_management import RoleManager
 
         # Check if user already has PROVIDER role (dual role scenario)
         if not user.is_provider():
