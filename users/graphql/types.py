@@ -8,13 +8,22 @@ class UserType(DjangoObjectType):
     sms_mfa_enabled = graphene.Boolean(source='mfa_sms_enabled', description="True if SMS MFA is enabled.")
     email_mfa_enabled = graphene.Boolean(source='mfa_email_enabled', description="True if Email MFA is enabled.")
 
+    # Role-related fields
+    primary_role = graphene.String(source='get_primary_role_name', description="The user's primary role (PATIENT, PROVIDER, ADMIN)")
+    roles = graphene.List(graphene.String, description="List of all active roles for this user")
+
+    def resolve_roles(self, info):
+        """Return list of active role names for this user."""
+        return [role.name for role in self.get_active_roles()]
+
     class Meta:
         model = User
         fields = (
             "id", "email", "first_name", "last_name", "is_active", "is_staff",
             "is_superuser", "is_suspended", "date_joined", "last_login",
             "email_verified",
-            "phone_number", "phone_number_verified"
+            "phone_number", "phone_number_verified",
+            "primary_role", "roles"  # Role-related fields
         )
         description = "Represents a user within the Afyaflow system."
         # You can also use exclude = ("password", "other_sensitive_fields")

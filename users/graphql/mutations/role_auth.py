@@ -275,3 +275,4 @@ class ProviderLoginMutation(graphene.Mutation):
 # COMMENTED OUT: Admin features not needed for now
 # AdminLoginMutation, AssignUserRoleMutation, and RemoveUserRoleMutation
 # have been removed to simplify the authentication system.
+        
