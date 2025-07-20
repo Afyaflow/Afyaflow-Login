@@ -1,3 +1,4 @@
+import logging
 import graphene
 from django.db import transaction
 from django.contrib.auth import authenticate
@@ -12,10 +13,13 @@ from ...permissions import graphql_require_role, graphql_require_permission
 from ...otp_utils import generate_otp, set_user_otp, verify_otp
 from ...communication_client import send_templated_email, send_sms
 
+logger = logging.getLogger(__name__)
+
 
 class InitiatePatientAuthMutation(graphene.Mutation):
     """
     Initiate passwordless authentication for patients using email or phone.
+    Handles both registration and login automatically with dual role support.
     """
     class Arguments:
         email = graphene.String()
@@ -36,15 +40,26 @@ class InitiatePatientAuthMutation(graphene.Mutation):
         
         client = get_client_from_context(info)
         
-        # Find or create patient user
+        # Find or create patient user with dual role support
         user = None
+        is_new_user = False
+        role_assigned = False
+        
         if email:
             try:
                 user = User.objects.get(email=email)
+                logger.info(f"Found existing user {email} for patient authentication")
+                
+                # Check if user already has PATIENT role
                 if not user.is_patient():
-                    # Auto-assign patient role if not already assigned
+                    # User exists but doesn't have PATIENT role - add it (dual role scenario)
                     role_manager = RoleManager(user)
-                    role_manager.assign_role('PATIENT', reason='Passwordless authentication')
+                    role_manager.assign_role('PATIENT', reason='Patient authentication - dual role assignment')
+                    role_assigned = True
+                    logger.info(f"Added PATIENT role to existing user {email} (dual role scenario)")
+                else:
+                    logger.info(f"User {email} already has PATIENT role")
+                    
             except User.DoesNotExist:
                 # Create new patient user
                 user = User.objects.create_user(
@@ -53,14 +68,25 @@ class InitiatePatientAuthMutation(graphene.Mutation):
                     email_verified=False
                 )
                 role_manager = RoleManager(user)
-                role_manager.assign_role('PATIENT', reason='Auto-registration')
+                role_manager.assign_role('PATIENT', reason='Auto-registration via patient authentication')
+                is_new_user = True
+                role_assigned = True
+                logger.info(f"Created new patient user {email}")
         
         elif phone_number:
             try:
                 user = User.objects.get(phone_number=phone_number)
+                logger.info(f"Found existing user with phone {phone_number} for patient authentication")
+                
                 if not user.is_patient():
+                    # User exists but doesn't have PATIENT role - add it (dual role scenario)
                     role_manager = RoleManager(user)
-                    role_manager.assign_role('PATIENT', reason='Passwordless authentication')
+                    role_manager.assign_role('PATIENT', reason='Patient authentication via phone - dual role assignment')
+                    role_assigned = True
+                    logger.info(f"Added PATIENT role to existing user with phone {phone_number} (dual role scenario)")
+                else:
+                    logger.info(f"User with phone {phone_number} already has PATIENT role")
+                    
             except User.DoesNotExist:
                 # Create new patient user with phone
                 user = User.objects.create_user(
@@ -70,7 +96,10 @@ class InitiatePatientAuthMutation(graphene.Mutation):
                     phone_number_verified=False
                 )
                 role_manager = RoleManager(user)
-                role_manager.assign_role('PATIENT', reason='Auto-registration')
+                role_manager.assign_role('PATIENT', reason='Auto-registration via patient phone authentication')
+                is_new_user = True
+                role_assigned = True
+                logger.info(f"Created new patient user with phone {phone_number}")
         
         # Generate OTP
         otp_code = generate_otp()
@@ -183,7 +212,7 @@ class CompletePatientAuthMutation(graphene.Mutation):
 
 class ProviderLoginMutation(graphene.Mutation):
     """
-    Enhanced provider login with mandatory TOTP verification.
+    Enhanced provider login with conditional TOTP verification.
     """
     class Arguments:
         email = graphene.String(required=True)
@@ -243,154 +272,6 @@ class ProviderLoginMutation(graphene.Mutation):
             )
 
 
-class AdminLoginMutation(graphene.Mutation):
-    """
-    Enhanced admin login with strict security requirements.
-    """
-    class Arguments:
-        email = graphene.String(required=True)
-        password = graphene.String(required=True)
-        totp_code = graphene.String(required=True)
-        device_fingerprint = graphene.String(required=True)
-        client_id = graphene.String()  # Optional when CLIENT_AUTH_ENABLED=false
-        client_api_key = graphene.String()  # Optional when CLIENT_AUTH_ENABLED=false
-    
-    auth_payload = graphene.Field(AuthPayloadType)
-    errors = graphene.List(graphene.String)
-    
-    @classmethod
-    @require_client_auth(['ADMIN_WEB'])
-    @transaction.atomic
-    def mutate(cls, root, info, email, password, totp_code, device_fingerprint):
-        try:
-            # Authenticate user
-            user = authenticate(username=email, password=password)
-            if not user:
-                raise GraphQLError("Invalid credentials")
-            
-            # Verify user is admin
-            if not user.is_admin_user():
-                raise GraphQLError("User is not an administrator")
-            
-            # Verify TOTP (mandatory for admins)
-            if not user.mfa_totp_setup_complete:
-                raise GraphQLError("TOTP setup required for admin account")
-            
-            if not verify_otp(user, totp_code, 'totp'):
-                raise GraphQLError("Invalid TOTP code")
-            
-            # Verify device fingerprint is provided
-            if not device_fingerprint:
-                raise GraphQLError("Device fingerprint required for admin authentication")
-            
-            # Create auth payload with shorter token lifetime
-            client = get_client_from_context(info)
-            
-            auth_data = create_auth_payload(
-                user,
-                mfa_required=False,
-                client=client,
-                device_fingerprint=device_fingerprint
-            )
-            
-            return AdminLoginMutation(
-                auth_payload=AuthPayloadType(**auth_data)
-            )
-            
-        except Exception as e:
-            return AdminLoginMutation(
-                errors=[str(e)]
-            )
-
-
-class AssignUserRoleMutation(graphene.Mutation):
-    """
-    Assign a role to a user (admin only).
-    """
-    class Arguments:
-        user_id = graphene.String(required=True)
-        role_name = graphene.String(required=True)
-        reason = graphene.String()
-        expires_at = graphene.DateTime()
-    
-    success = graphene.Boolean()
-    message = graphene.String()
-    errors = graphene.List(graphene.String)
-    
-    @classmethod
-    @graphql_require_role('ADMIN')
-    @transaction.atomic
-    def mutate(cls, root, info, user_id, role_name, reason=None, expires_at=None):
-        try:
-            # Get target user
-            try:
-                target_user = User.objects.get(id=user_id)
-            except User.DoesNotExist:
-                raise GraphQLError("User not found")
-            
-            # Get current user (admin)
-            current_user = info.context.user
-            
-            # Assign role
-            role_manager = RoleManager(target_user, assigned_by=current_user)
-            assignment = role_manager.assign_role(role_name, expires_at, reason)
-            
-            return AssignUserRoleMutation(
-                success=True,
-                message=f"Role '{role_name}' assigned to user {target_user.email}"
-            )
-            
-        except Exception as e:
-            return AssignUserRoleMutation(
-                success=False,
-                errors=[str(e)]
-            )
-
-
-class RemoveUserRoleMutation(graphene.Mutation):
-    """
-    Remove a role from a user (admin only).
-    """
-    class Arguments:
-        user_id = graphene.String(required=True)
-        role_name = graphene.String(required=True)
-        reason = graphene.String()
-    
-    success = graphene.Boolean()
-    message = graphene.String()
-    errors = graphene.List(graphene.String)
-    
-    @classmethod
-    @graphql_require_role('ADMIN')
-    @transaction.atomic
-    def mutate(cls, root, info, user_id, role_name, reason=None):
-        try:
-            # Get target user
-            try:
-                target_user = User.objects.get(id=user_id)
-            except User.DoesNotExist:
-                raise GraphQLError("User not found")
-            
-            # Get current user (admin)
-            current_user = info.context.user
-            
-            # Remove role
-            role_manager = RoleManager(target_user, assigned_by=current_user)
-            success = role_manager.remove_role(role_name, reason)
-            
-            if success:
-                return RemoveUserRoleMutation(
-                    success=True,
-                    message=f"Role '{role_name}' removed from user {target_user.email}"
-                )
-            else:
-                return RemoveUserRoleMutation(
-                    success=False,
-                    errors=[f"User does not have role '{role_name}'"]
-                )
-            
-        except Exception as e:
-            return RemoveUserRoleMutation(
-                success=False,
-                errors=[str(e)]
-            )
+# COMMENTED OUT: Admin features not needed for now
+# AdminLoginMutation, AssignUserRoleMutation, and RemoveUserRoleMutation
+# have been removed to simplify the authentication system.

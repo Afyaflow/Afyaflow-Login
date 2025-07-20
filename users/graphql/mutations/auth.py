@@ -63,6 +63,22 @@ class RegisterMutation(graphene.Mutation):
         
         user = serializer.save()
 
+        # Automatically assign PROVIDER role for provider registration
+        client = get_client_from_context(info)
+        from ..role_management import RoleManager
+
+        # Check if user already has PROVIDER role (dual role scenario)
+        if not user.is_provider():
+            role_manager = RoleManager(user)
+            try:
+                role_manager.assign_role('PROVIDER', reason=f'Provider registration via {client.client_name if client else "provider client"}')
+                logger.info(f"Assigned PROVIDER role to new user {user.email}")
+            except Exception as e:
+                logger.error(f"Failed to assign PROVIDER role to user {user.email}: {e}")
+                # Continue with registration even if role assignment fails
+        else:
+            logger.info(f"User {user.email} already has PROVIDER role")
+
         # Create EmailAddress record for allauth consistency
         from allauth.account.models import EmailAddress
         EmailAddress.objects.create(

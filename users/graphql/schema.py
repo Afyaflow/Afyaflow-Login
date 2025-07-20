@@ -45,9 +45,7 @@ from .mutations.role_auth import (
     InitiatePatientAuthMutation,
     CompletePatientAuthMutation,
     ProviderLoginMutation,
-    AdminLoginMutation,
-    AssignUserRoleMutation,
-    RemoveUserRoleMutation,
+    # AdminLoginMutation, AssignUserRoleMutation, RemoveUserRoleMutation - commented out
 )
 
 # Then import queries
@@ -103,10 +101,8 @@ class UserMutation(graphene.ObjectType):
     # Enhanced Role-Based Authentication
     initiate_patient_auth = InitiatePatientAuthMutation.Field(description="Initiate passwordless authentication for patients")
     complete_patient_auth = CompletePatientAuthMutation.Field(description="Complete passwordless authentication for patients with OTP")
-    provider_login = ProviderLoginMutation.Field(description="Enhanced provider login with mandatory TOTP")
-    admin_login = AdminLoginMutation.Field(description="Enhanced admin login with strict security requirements")
-    assign_user_role = AssignUserRoleMutation.Field(description="Assign a role to a user (admin only)")
-    remove_user_role = RemoveUserRoleMutation.Field(description="Remove a role from a user (admin only)")
+    provider_login = ProviderLoginMutation.Field(description="Enhanced provider login with conditional TOTP")
+    # admin_login, assign_user_role, remove_user_role - commented out for now
 
 
 # Build the federated schema
