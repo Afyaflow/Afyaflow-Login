@@ -12,15 +12,16 @@ from .models import User, RefreshToken, AuthenticationAttempt
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
-    list_display = ('email', 'first_name', 'last_name', 'user_type', 'is_active', 'is_staff', 'is_suspended')
+    list_display = ('email', 'first_name', 'last_name', 'user_type', 'patient_profile_enabled', 'is_active', 'is_staff', 'is_suspended')
     search_fields = ('email', 'first_name', 'last_name')
-    list_filter = ('user_type', 'is_active', 'is_staff', 'is_suspended', 'email_verified')
+    list_filter = ('user_type', 'patient_profile_enabled', 'is_active', 'is_staff', 'is_suspended', 'email_verified')
     ordering = ('email',)
 
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
         (_('Personal info'), {'fields': ('first_name', 'last_name', 'phone_number')}),
         (_('User Type'), {'fields': ('user_type',)}),
+        (_('Dual Role Support'), {'fields': ('patient_profile_enabled', 'patient_services_first_used')}),
         (_('Verification'), {'fields': ('email_verified', 'phone_number_verified')}),
         (_('MFA Settings'), {'fields': ('mfa_totp_setup_complete', 'mfa_email_enabled', 'mfa_sms_enabled')}),
         (_('Status'), {'fields': ('is_suspended', 'suspension_reason')}),

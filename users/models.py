@@ -70,7 +70,11 @@ class User(AbstractUser):
     # Account status
     is_suspended = models.BooleanField(default=False)
     suspension_reason = models.TextField(null=True, blank=True)
-    
+
+    # Dual-role support (for providers who also need patient services)
+    patient_profile_enabled = models.BooleanField(default=False, help_text="Whether this user can access patient services")
+    patient_services_first_used = models.DateTimeField(null=True, blank=True, help_text="When user first accessed patient services")
+
     # Password Reset fields
     password_reset_token = models.CharField(max_length=128, null=True, blank=True)
     password_reset_token_expires_at = models.DateTimeField(null=True, blank=True)
@@ -107,6 +111,22 @@ class User(AbstractUser):
         if self.mfa_sms_enabled and self.phone_number_verified:
             methods.append("SMS")
         return methods
+
+    def can_act_as_patient(self):
+        """Check if user can access patient services."""
+        return self.user_type == 'patient' or (
+            self.user_type == 'provider' and self.patient_profile_enabled
+        )
+
+    def enable_patient_services(self):
+        """Enable patient services for providers."""
+        if self.user_type == 'provider' and not self.patient_profile_enabled:
+            from django.utils import timezone
+            self.patient_profile_enabled = True
+            self.patient_services_first_used = timezone.now()
+            self.save(update_fields=['patient_profile_enabled', 'patient_services_first_used'])
+            return True
+        return False
 
     # User type helper methods
     def is_patient(self):

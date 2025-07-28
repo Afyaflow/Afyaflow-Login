@@ -192,10 +192,17 @@ def _claim_pending_invitations(user: User):
         logger.error(f"Failed to claim pending invitations for user {user.email}. Error: {response_data.get('errors')}")
 
 
-def create_auth_payload(user, mfa_required=False, mfa_token=None, enabled_mfa_methods=None):
+def create_auth_payload(user, mfa_required=False, mfa_token=None, enabled_mfa_methods=None, current_context=None):
     """
     Generates the authentication payload for a user.
     Includes access and refresh tokens unless an MFA step is explicitly required.
+
+    Args:
+        user: User object
+        mfa_required: Whether MFA is required
+        mfa_token: MFA token if required
+        enabled_mfa_methods: List of enabled MFA methods
+        current_context: Current role context ('patient', 'provider') for dual-role users
     """
     from ..graphql.types import OrganizationMembershipType # Lazy import to avoid circular dependency
     
@@ -215,11 +222,21 @@ def create_auth_payload(user, mfa_required=False, mfa_token=None, enabled_mfa_me
 
     # 3. If MFA is not required, generate and add tokens
     if not mfa_required:
-        # Create access token with user type for gateway compliance
-        access_token_str, _ = create_token(user.id, token_type='access', user_type=user.user_type)
+        # Create access token with user type and context for gateway compliance
+        access_token_str, _ = create_token(
+            user.id,
+            token_type='access',
+            user_type=user.user_type,
+            current_context=current_context
+        )
 
-        # Create and store refresh token with user type for gateway compliance
-        refresh_token_str, refresh_expires_at = create_token(user.id, token_type='refresh', user_type=user.user_type)
+        # Create and store refresh token with user type and context for gateway compliance
+        refresh_token_str, refresh_expires_at = create_token(
+            user.id,
+            token_type='refresh',
+            user_type=user.user_type,
+            current_context=current_context
+        )
         
         # Store the refresh token in the database
         RefreshToken.objects.create(

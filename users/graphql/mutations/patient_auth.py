@@ -94,25 +94,32 @@ class InitiatePatientAuthMutation(graphene.Mutation):
                     user = None
                     existing_user = False
             
-            # If user exists, verify they are a patient
-            if existing_user and user.user_type != 'patient':
-                # Log attempt but don't reveal user type for security
-                AuthenticationAttempt.objects.create(
-                    email=normalized_identifier if identifier_type == 'email' else None,
-                    attempt_type='login',
-                    ip_address=client_ip,
-                    user_agent=info.context.META.get('HTTP_USER_AGENT', ''),
-                    success=False,
-                    failure_reason='Non-patient user attempted passwordless auth',
-                    user=user,
-                    metadata={'identifier_type': identifier_type}
-                )
-                
-                return cls(response=PatientOTPResponse(
-                    success=False,
-                    message="This authentication method is not available for your account type.",
-                    otp_sent=False
-                ))
+            # Check if user can access patient services
+            if existing_user and not user.can_act_as_patient():
+                # Only operations users are blocked from patient services
+                if user.user_type == 'operations':
+                    # Log attempt but don't reveal user type for security
+                    AuthenticationAttempt.objects.create(
+                        email=normalized_identifier if identifier_type == 'email' else None,
+                        attempt_type='login',
+                        ip_address=client_ip,
+                        user_agent=info.context.META.get('HTTP_USER_AGENT', ''),
+                        success=False,
+                        failure_reason='Operations user attempted passwordless auth',
+                        user=user,
+                        metadata={'identifier_type': identifier_type}
+                    )
+
+                    return cls(response=PatientOTPResponse(
+                        success=False,
+                        message="This authentication method is not available for your account type.",
+                        otp_sent=False
+                    ))
+
+                # For providers, auto-enable patient services
+                elif user.user_type == 'provider':
+                    user.enable_patient_services()
+                    logger.info(f"Auto-enabled patient services for provider: {user.email}")
             
             # Generate OTP
             otp = generate_otp()
@@ -321,8 +328,10 @@ class CompletePatientAuthMutation(graphene.Mutation):
             user.last_login = timezone.now()
             user.save(update_fields=['last_login'])
             
-            # Create auth payload with patient-specific tokens
-            auth_payload = create_auth_payload(user, mfa_required=False)
+            # Create auth payload with patient context
+            # For providers using patient services, set current_context to 'patient'
+            current_context = 'patient' if user.user_type == 'provider' else None
+            auth_payload = create_auth_payload(user, mfa_required=False, current_context=current_context)
             
             # Log successful authentication
             AuthenticationAttempt.objects.create(

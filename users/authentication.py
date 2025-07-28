@@ -161,7 +161,8 @@ class JWTAuthentication(authentication.BaseAuthentication):
             raise AuthenticationFailed('User not found.')
 
 
-def create_token(user_id: str, token_type: str = 'access', user_type: str = 'provider') -> Tuple[str, datetime]:
+def create_token(user_id: str, token_type: str = 'access', user_type: str = None,
+                current_context: str = None) -> Tuple[str, datetime]:
     """
     Create a new JWT token for the given user with gateway compliance.
 
@@ -169,6 +170,7 @@ def create_token(user_id: str, token_type: str = 'access', user_type: str = 'pro
         user_id: The user's ID
         token_type: Type of token ('access', 'refresh', 'mfa')
         user_type: User type for gateway compliance ('provider', 'patient', 'operations')
+        current_context: Current role context ('patient', 'provider') for dual-role users
 
     Returns:
         Tuple of (token_string, expires_at_datetime)
@@ -198,6 +200,11 @@ def create_token(user_id: str, token_type: str = 'access', user_type: str = 'pro
         'exp': expires_at.timestamp(),  # expiration time
         'jti': token_jti,  # JWT ID for blacklisting
     }
+
+    # Add context information for dual-role users
+    if current_context and current_context != user_type:
+        payload['current_context'] = current_context
+        payload['original_user_type'] = user_type
 
     # Get the appropriate secret for the user type
     jwt_secret = get_jwt_secret_for_user_type(user_type)
