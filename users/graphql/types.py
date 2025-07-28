@@ -3,7 +3,7 @@ from graphene_django import DjangoObjectType
 from ..models import User
 
 class UserType(DjangoObjectType):
-    """GraphQL type for the User model, representing a healthcare professional or system user."""
+    """GraphQL type for the User model, representing a healthcare professional, patient, or operations user."""
     totp_mfa_enabled = graphene.Boolean(source='mfa_totp_setup_complete', description="True if TOTP MFA is configured and verified.")
     sms_mfa_enabled = graphene.Boolean(source='mfa_sms_enabled', description="True if SMS MFA is enabled.")
     email_mfa_enabled = graphene.Boolean(source='mfa_email_enabled', description="True if Email MFA is enabled.")
@@ -13,10 +13,10 @@ class UserType(DjangoObjectType):
         fields = (
             "id", "email", "first_name", "last_name", "is_active", "is_staff",
             "is_superuser", "is_suspended", "date_joined", "last_login",
-            "email_verified",
+            "email_verified", "user_type",
             "phone_number", "phone_number_verified"
         )
-        description = "Represents a user within the Afyaflow system."
+        description = "Represents a user within the Afyaflow system (provider, patient, or operations)."
         # You can also use exclude = ("password", "other_sensitive_fields")
 
     @classmethod

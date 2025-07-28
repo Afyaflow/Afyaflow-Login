@@ -22,6 +22,13 @@ class UserManager(BaseUserManager):
 
 
 class User(AbstractUser):
+    # User type choices for gateway compliance
+    USER_TYPE_CHOICES = [
+        ('provider', 'Provider'),
+        ('patient', 'Patient'),
+        ('operations', 'Operations'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     username = None  # Disable username field
     email = models.EmailField(_('email address'), unique=True)
@@ -31,7 +38,15 @@ class User(AbstractUser):
     is_staff = models.BooleanField(default=False)
     date_joined = models.DateTimeField(auto_now_add=True)
     last_login = models.DateTimeField(null=True, blank=True)
-    
+
+    # User type for gateway compliance
+    user_type = models.CharField(
+        max_length=20,
+        choices=USER_TYPE_CHOICES,
+        default='provider',
+        help_text="User type for gateway authentication (provider, patient, operations)"
+    )
+
     # Email verification
     email_verified = models.BooleanField(default=False, help_text="Indicates if the user has verified their email address.")
     
@@ -92,6 +107,23 @@ class User(AbstractUser):
         if self.mfa_sms_enabled and self.phone_number_verified:
             methods.append("SMS")
         return methods
+
+    # User type helper methods
+    def is_patient(self):
+        """Check if user is a patient (uses passwordless authentication)."""
+        return self.user_type == 'patient'
+
+    def is_provider(self):
+        """Check if user is a healthcare provider."""
+        return self.user_type == 'provider'
+
+    def is_operations(self):
+        """Check if user is an operations user."""
+        return self.user_type == 'operations'
+
+    def requires_password(self):
+        """Check if user type requires password authentication."""
+        return self.user_type in ['provider', 'operations']
 
 
 class RefreshToken(models.Model):

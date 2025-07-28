@@ -12,13 +12,15 @@ from .models import User, RefreshToken, AuthenticationAttempt
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
-    list_display = ('email', 'first_name', 'last_name', 'is_active', 'is_staff', 'is_suspended')
+    list_display = ('email', 'first_name', 'last_name', 'user_type', 'is_active', 'is_staff', 'is_suspended')
     search_fields = ('email', 'first_name', 'last_name')
+    list_filter = ('user_type', 'is_active', 'is_staff', 'is_suspended', 'email_verified')
     ordering = ('email',)
-    
+
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
         (_('Personal info'), {'fields': ('first_name', 'last_name', 'phone_number')}),
+        (_('User Type'), {'fields': ('user_type',)}),
         (_('Verification'), {'fields': ('email_verified', 'phone_number_verified')}),
         (_('MFA Settings'), {'fields': ('mfa_totp_setup_complete', 'mfa_email_enabled', 'mfa_sms_enabled')}),
         (_('Status'), {'fields': ('is_suspended', 'suspension_reason')}),
@@ -27,13 +29,24 @@ class UserAdmin(BaseUserAdmin):
         }),
         (_('Important dates'), {'fields': ('last_login', 'date_joined')}),
     )
-    
+
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('email', 'password1', 'password2', 'first_name', 'last_name'),
+            'fields': ('email', 'password1', 'password2', 'first_name', 'last_name', 'user_type'),
         }),
     )
+
+    def get_form(self, request, obj=None, **kwargs):
+        """Customize form based on user type."""
+        form = super().get_form(request, obj, **kwargs)
+
+        # For operations users, make them staff by default
+        if obj and obj.user_type == 'operations':
+            if 'is_staff' in form.base_fields:
+                form.base_fields['is_staff'].initial = True
+
+        return form
 
 
 @admin.register(RefreshToken)
