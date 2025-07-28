@@ -48,6 +48,24 @@ class UserAdmin(BaseUserAdmin):
 
         return form
 
+    def save_model(self, request, obj, form, change):
+        """Custom save logic for different user types."""
+        # For new operations users, ensure they have staff privileges
+        if not change and obj.user_type == 'operations':
+            obj.is_staff = True
+
+        super().save_model(request, obj, form, change)
+
+    def get_readonly_fields(self, request, obj=None):
+        """Make certain fields readonly based on user type."""
+        readonly_fields = list(super().get_readonly_fields(request, obj))
+
+        # For patients, make certain fields readonly since they use passwordless auth
+        if obj and obj.user_type == 'patient':
+            readonly_fields.extend(['password'])
+
+        return readonly_fields
+
 
 @admin.register(RefreshToken)
 class RefreshTokenAdmin(admin.ModelAdmin):

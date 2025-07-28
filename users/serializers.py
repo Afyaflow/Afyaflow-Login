@@ -21,6 +21,8 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data.pop('password_confirm')
+        # Set user_type to 'provider' for all registrations through this serializer
+        validated_data['user_type'] = 'provider'
         user = User.objects.create_user(**validated_data)
         return user
 

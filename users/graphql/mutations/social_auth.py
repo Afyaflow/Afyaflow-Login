@@ -194,13 +194,14 @@ class GoogleLoginMutation(BaseSocialAuthMutation):
                         email_address.primary = True
                         email_address.save()
                 except User.DoesNotExist:
-                    # Create new user
+                    # Create new user with provider type
                     user = User.objects.create_user(
                         email=email,
                         first_name=user_data.get('given_name', ''),
                         last_name=user_data.get('family_name', ''),
                         is_active=True,
-                        email_verified=True  # Set email as verified for social login
+                        email_verified=True,  # Set email as verified for social login
+                        user_type='provider'  # Social auth users are providers
                     )
                     user.set_unusable_password()
                     user.save()
@@ -287,13 +288,14 @@ class MicrosoftLoginMutation(BaseSocialAuthMutation):
                         email_address.primary = True
                         email_address.save()
                 except User.DoesNotExist:
-                    # Create new user
+                    # Create new user with provider type
                     user = User.objects.create_user(
                         email=email,
                         first_name=user_data.get('givenName', ''),
                         last_name=user_data.get('surname', ''),
                         is_active=True,
-                        email_verified=True  # Set email as verified for social login
+                        email_verified=True,  # Set email as verified for social login
+                        user_type='provider'  # Social auth users are providers
                     )
                     user.set_unusable_password()
                     user.save()
@@ -397,7 +399,8 @@ class LinkedInLoginMutation(BaseSocialAuthMutation):
                         first_name=profile_data.get('localizedFirstName', ''),
                         last_name=profile_data.get('localizedLastName', ''),
                         is_active=True,
-                        email_verified=True
+                        email_verified=True,
+                        user_type='provider'  # Social auth users are providers
                     )
                     user.set_unusable_password()
                     user.save()
