@@ -91,6 +91,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'users.service_auth.ServiceAuthMiddleware',  # Service auth before JWT auth
     'users.auth_middleware.GraphQLJWTMiddleware',
     'allauth.account.middleware.AccountMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -299,6 +300,10 @@ if DEBUG:
 # Organization Service settings
 ORGANIZATION_SERVICE_URL = os.getenv('ORGANIZATION_SERVICE_URL')
 INTERNAL_SERVICE_TOKEN = os.getenv('INTERNAL_SERVICE_TOKEN')
+
+# Service-to-Service Authentication settings
+AUTH_SERVICE_ID = os.getenv('AUTH_SERVICE_ID', 'auth-service')
+SERVICE_ACCOUNT_IDS = os.getenv('SERVICE_ACCOUNT_IDS', '')
 
 # Email Service settings
 EMAIL_SERVICE_URL = os.getenv('EMAIL_SERVICE_URL')

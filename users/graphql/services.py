@@ -14,16 +14,21 @@ def _execute_org_service_query(query: str, variables: dict) -> dict:
     org_service_url = getattr(settings, 'ORGANIZATION_SERVICE_URL', None)
     token = getattr(settings, 'INTERNAL_SERVICE_TOKEN', None)
 
-    if not org_service_url or not token:
-        logger.error("ORGANIZATION_SERVICE_URL or INTERNAL_SERVICE_TOKEN is not configured.")
+    if not org_service_url:
+        logger.error("ORGANIZATION_SERVICE_URL is not configured.")
         return {}
 
     try:
-        # The URL for a GraphQL service is typically the main endpoint
-        headers = {
-            'Authorization': f'Bearer {token}',
-            'Content-Type': 'application/json',
-        }
+        # Import here to avoid circular imports
+        from ..service_auth import create_service_auth_headers
+
+        # Create service authentication headers
+        headers = create_service_auth_headers(target_service='organization-service')
+
+        # Add legacy token for backward compatibility if available
+        if token:
+            headers['Authorization'] = f'Bearer {token}'
+
         payload = {'query': query, 'variables': variables}
         response = requests.post(org_service_url, headers=headers, json=payload, timeout=5)
         response.raise_for_status()

@@ -43,6 +43,14 @@ class PatientOTPResponse(graphene.ObjectType):
     identifier_type = graphene.String(description="Type of identifier used (email or phone).")
 
 
+class ServiceAuthInfo(graphene.ObjectType):
+    """Information about service authentication context."""
+    service_id = graphene.String(required=True, description="The authenticated service ID.")
+    service_type = graphene.String(required=True, description="The type of service.")
+    permissions = graphene.List(graphene.String, description="List of permissions for this service.")
+    is_service = graphene.Boolean(required=True, description="Always true for service accounts.")
+
+
 class OrganizationStub(graphene.ObjectType):
     """Represents an Organization entity, resolved by the Organization subgraph."""
     id = graphene.UUID(required=True, description="The unique identifier of the organization.")

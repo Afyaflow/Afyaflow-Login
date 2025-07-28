@@ -22,8 +22,14 @@ class GraphQLJWTMiddleware:
 
         # Only handle GraphQL requests
         if 'graphql' in request.path:
-            request.user = SimpleLazyObject(lambda: self.get_user(request))
-        
+            # Check if service authentication already handled this request
+            if getattr(request, 'service_authenticated', False):
+                # Service authentication takes precedence, don't override
+                pass
+            else:
+                # Use JWT authentication
+                request.user = SimpleLazyObject(lambda: self.get_user(request))
+
         return self.get_response(request)
 
     def get_user(self, request):

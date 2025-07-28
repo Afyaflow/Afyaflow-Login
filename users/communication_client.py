@@ -20,8 +20,8 @@ def send_templated_email(recipient: str, template_id: str, context: dict):
     email_service_url = settings.EMAIL_SERVICE_URL
     internal_service_token = settings.INTERNAL_SERVICE_TOKEN
 
-    if not email_service_url or not internal_service_token:
-        logger.error("EMAIL_SERVICE_URL or INTERNAL_SERVICE_TOKEN is not configured.")
+    if not email_service_url:
+        logger.error("EMAIL_SERVICE_URL is not configured.")
         return False
 
     mutation = """
@@ -39,10 +39,15 @@ def send_templated_email(recipient: str, template_id: str, context: dict):
         'contextJson': json.dumps(context)
     }
 
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {internal_service_token}'
-    }
+    # Import here to avoid circular imports
+    from .service_auth import create_service_auth_headers
+
+    # Create service authentication headers
+    headers = create_service_auth_headers(target_service='email-service')
+
+    # Add legacy token for backward compatibility if available
+    if internal_service_token:
+        headers['Authorization'] = f'Bearer {internal_service_token}'
 
     try:
         response = requests.post(
@@ -88,8 +93,8 @@ def send_sms(recipient: str, message: str) -> bool:
     sms_service_url = settings.EMAIL_SERVICE_URL # Same service
     internal_service_token = settings.INTERNAL_SERVICE_TOKEN
 
-    if not sms_service_url or not internal_service_token:
-        logger.error("EMAIL_SERVICE_URL or INTERNAL_SERVICE_TOKEN is not configured.")
+    if not sms_service_url:
+        logger.error("EMAIL_SERVICE_URL is not configured.")
         return False
 
     mutation = """
@@ -106,10 +111,15 @@ def send_sms(recipient: str, message: str) -> bool:
         'message': message,
     }
 
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {internal_service_token}'
-    }
+    # Import here to avoid circular imports
+    from .service_auth import create_service_auth_headers
+
+    # Create service authentication headers
+    headers = create_service_auth_headers(target_service='email-service')  # Same service handles SMS
+
+    # Add legacy token for backward compatibility if available
+    if internal_service_token:
+        headers['Authorization'] = f'Bearer {internal_service_token}'
 
     logger.info(f"Attempting to send SMS via service. Recipient: {recipient}")
     logger.warning(f"SMS Service Request Payload: query={mutation}, variables={variables}")
