@@ -69,3 +69,12 @@ SECURITY_IMPLEMENTATION_SUMMARY.md
 test_graphql_endpoint.py
 SECURITY_VULNERABILITY_REPORT.md
 
+test_*
+test*
+*.md
+.gitignore
+auto_cleanup.py
+*.env*
+final_validation_report.json
+cleanup_legacy_code.py
+fix_migrations.py
