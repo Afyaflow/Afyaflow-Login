@@ -41,6 +41,10 @@ from .mutations.verification import (
     VerifyEmailMutation,
     ResendVerificationEmailMutation,
 )
+from .mutations.patient_auth import (
+    InitiatePatientAuthMutation,
+    CompletePatientAuthMutation,
+)
 
 # Then import queries
 from .queries import UserQuery
@@ -91,6 +95,10 @@ class UserMutation(graphene.ObjectType):
     update_phone_number = UpdatePhoneNumberMutation.Field(description="Updates the user's phone number and sends a verification code.")
     remove_phone_number = RemovePhoneNumberMutation.Field(description="Removes the user's phone number and disables SMS MFA.")
     resend_phone_verification = ResendPhoneVerificationMutation.Field(description="Resends the phone verification OTP.")
+
+    # Patient Passwordless Authentication
+    initiate_patient_auth = InitiatePatientAuthMutation.Field(description="Initiates passwordless authentication for patients by sending an OTP.")
+    complete_patient_auth = CompletePatientAuthMutation.Field(description="Completes passwordless authentication for patients by verifying the OTP.")
 
 
 # Build the federated schema

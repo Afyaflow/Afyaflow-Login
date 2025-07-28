@@ -34,11 +34,20 @@ class ScopedAuthPayload(graphene.ObjectType):
     oct = graphene.String(required=True, name="organizationContextToken", description="JWT containing the user's context and permissions for the selected organization.")
     user = graphene.Field(lambda: UserType, required=True)
 
+class PatientOTPResponse(graphene.ObjectType):
+    """Response type for patient OTP initiation."""
+    success = graphene.Boolean(required=True, description="Whether the OTP was successfully sent.")
+    message = graphene.String(required=True, description="Human-readable message about the operation.")
+    otp_sent = graphene.Boolean(required=True, description="Whether an OTP was sent to the identifier.")
+    expires_at = graphene.DateTime(description="When the OTP expires (if sent).")
+    identifier_type = graphene.String(description="Type of identifier used (email or phone).")
+
+
 class OrganizationStub(graphene.ObjectType):
     """Represents an Organization entity, resolved by the Organization subgraph."""
     id = graphene.UUID(required=True, description="The unique identifier of the organization.")
     name = graphene.String(required=True, description="The name of the organization.")
-   
+
     @classmethod
     def __resolve_reference(cls, info, **data):
         # This stub is primarily for linking. The actual data is resolved by the Organization service.
