@@ -241,13 +241,40 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 10
 }
 
-# JWT Settings
-JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', SECRET_KEY)
+# JWT Settings - Gateway Compliance with User-Type-Specific Secrets
+JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', SECRET_KEY)  # Legacy fallback
 JWT_ALGORITHM = 'HS256'
 JWT_ACCESS_TOKEN_LIFETIME = 30  # minutes
 JWT_REFRESH_TOKEN_LIFETIME = 1440  # minutes (24 hours)
 JWT_OCT_LIFETIME = 30 # minutes, lifetime for the organization context token
 JWT_MFA_TOKEN_LIFETIME = 5 # minutes, for the two-step login flow
+
+# Gateway Compliance: User-Type-Specific JWT Secrets
+PROVIDER_AUTH_TOKEN_SECRET = os.getenv('PROVIDER_AUTH_TOKEN_SECRET')
+PATIENT_AUTH_TOKEN_SECRET = os.getenv('PATIENT_AUTH_TOKEN_SECRET')
+OPERATIONS_AUTH_TOKEN_SECRET = os.getenv('OPERATIONS_AUTH_TOKEN_SECRET')
+ORG_CONTEXT_TOKEN_SECRET = os.getenv('ORG_CONTEXT_TOKEN_SECRET')
+
+# Generate temporary secrets if not set (development only)
+if not PROVIDER_AUTH_TOKEN_SECRET:
+    import secrets
+    PROVIDER_AUTH_TOKEN_SECRET = secrets.token_urlsafe(64)
+    logger.warning("PROVIDER_AUTH_TOKEN_SECRET not set. Generated temporary key. Set for production!")
+
+if not PATIENT_AUTH_TOKEN_SECRET:
+    import secrets
+    PATIENT_AUTH_TOKEN_SECRET = secrets.token_urlsafe(64)
+    logger.warning("PATIENT_AUTH_TOKEN_SECRET not set. Generated temporary key. Set for production!")
+
+if not OPERATIONS_AUTH_TOKEN_SECRET:
+    import secrets
+    OPERATIONS_AUTH_TOKEN_SECRET = secrets.token_urlsafe(64)
+    logger.warning("OPERATIONS_AUTH_TOKEN_SECRET not set. Generated temporary key. Set for production!")
+
+if not ORG_CONTEXT_TOKEN_SECRET:
+    import secrets
+    ORG_CONTEXT_TOKEN_SECRET = secrets.token_urlsafe(64)
+    logger.warning("ORG_CONTEXT_TOKEN_SECRET not set. Generated temporary key. Set for production!")
 
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only for development

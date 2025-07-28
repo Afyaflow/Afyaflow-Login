@@ -10,6 +10,36 @@ from rest_framework.exceptions import AuthenticationFailed
 from users.models import User
 
 
+def get_jwt_secret_for_user_type(user_type: str) -> str:
+    """
+    Get the appropriate JWT secret based on user type for gateway compliance.
+
+    Args:
+        user_type: The user type ('provider', 'patient', 'operations')
+
+    Returns:
+        The appropriate JWT secret for the user type
+
+    Raises:
+        ValueError: If user_type is invalid
+    """
+    secret_mapping = {
+        'provider': settings.PROVIDER_AUTH_TOKEN_SECRET,
+        'patient': settings.PATIENT_AUTH_TOKEN_SECRET,
+        'operations': settings.OPERATIONS_AUTH_TOKEN_SECRET,
+    }
+
+    if user_type not in secret_mapping:
+        raise ValueError(f"Invalid user_type: {user_type}. Must be one of: {list(secret_mapping.keys())}")
+
+    return secret_mapping[user_type]
+
+
+def get_oct_secret() -> str:
+    """Get the Organization Context Token secret."""
+    return settings.ORG_CONTEXT_TOKEN_SECRET
+
+
 class JWTAuthentication(authentication.BaseAuthentication):
     def authenticate(self, request) -> Optional[Tuple[User, dict]]:
         # Get the Authorization header
@@ -24,12 +54,8 @@ class JWTAuthentication(authentication.BaseAuthentication):
             if auth_type.lower() != 'bearer':
                 return None
 
-            # Decode and validate the token
-            payload = jwt.decode(
-                token,
-                settings.JWT_SECRET_KEY,
-                algorithms=[settings.JWT_ALGORITHM]
-            )
+            # Decode and validate the token with appropriate secret (gateway compliance)
+            payload = self._decode_token_with_appropriate_secret(token)
 
             # Check if token is blacklisted
             token_jti = payload.get('jti')
@@ -49,6 +75,11 @@ class JWTAuthentication(authentication.BaseAuthentication):
             except User.DoesNotExist:
                 raise AuthenticationFailed('User not found')
 
+            # Verify user_type in token matches user's actual type (gateway compliance)
+            token_user_type = payload.get('user_type')
+            if token_user_type and token_user_type != user.user_type:
+                raise AuthenticationFailed('Token user type mismatch')
+
             # Check if user is active and not suspended
             if not user.is_active:
                 raise AuthenticationFailed('User is inactive')
@@ -62,23 +93,63 @@ class JWTAuthentication(authentication.BaseAuthentication):
         except ValueError:
             raise AuthenticationFailed('Invalid authorization header')
 
+    def _decode_token_with_appropriate_secret(self, token: str) -> dict:
+        """
+        Decode JWT token using the appropriate secret based on user type.
+        Since we need to decode to get user_type, we try different secrets.
+        """
+        # List of secrets to try (user-type-specific + legacy fallback)
+        secrets_to_try = [
+            ('provider', settings.PROVIDER_AUTH_TOKEN_SECRET),
+            ('patient', settings.PATIENT_AUTH_TOKEN_SECRET),
+            ('operations', settings.OPERATIONS_AUTH_TOKEN_SECRET),
+            ('legacy', settings.JWT_SECRET_KEY),  # Fallback for old tokens
+        ]
+
+        last_error = None
+        for secret_name, secret in secrets_to_try:
+            try:
+                payload = jwt.decode(
+                    token,
+                    secret,
+                    algorithms=[settings.JWT_ALGORITHM]
+                )
+
+                # If we successfully decoded, verify the user_type matches the secret used
+                token_user_type = payload.get('user_type')
+                if token_user_type and secret_name != 'legacy':
+                    if token_user_type != secret_name:
+                        continue  # Wrong secret for this user type
+
+                return payload
+
+            except JWTError as e:
+                last_error = e
+                continue
+
+        # If we get here, none of the secrets worked
+        raise last_error or JWTError("Unable to decode token with any available secret")
+
     def authenticate_mfa_token(self, token: str) -> Tuple[User, dict]:
         """
         Authenticates a user from a raw MFA token string, bypassing the request header.
         This is specifically for the second step of the MFA login flow.
         """
         try:
-            payload = jwt.decode(
-                token,
-                settings.JWT_SECRET_KEY,
-                algorithms=[settings.JWT_ALGORITHM]
-            )
+            # Use the same multi-secret decoding logic for MFA tokens
+            payload = self._decode_token_with_appropriate_secret(token)
 
             user_id = payload.get('sub')
             if user_id is None:
                 raise AuthenticationFailed('Invalid MFA token payload.')
 
             user = User.objects.get(id=user_id)
+
+            # Verify user_type in token matches user's actual type
+            token_user_type = payload.get('user_type')
+            if token_user_type and token_user_type != user.user_type:
+                raise AuthenticationFailed('Token user type mismatch')
+
             if not user.is_active or user.is_suspended:
                 raise AuthenticationFailed('User account is inactive or suspended.')
 
@@ -90,12 +161,20 @@ class JWTAuthentication(authentication.BaseAuthentication):
             raise AuthenticationFailed('User not found.')
 
 
-def create_token(user_id: str, token_type: str = 'access') -> Tuple[str, datetime]:
+def create_token(user_id: str, token_type: str = 'access', user_type: str = 'provider') -> Tuple[str, datetime]:
     """
-    Create a new JWT token for the given user
+    Create a new JWT token for the given user with gateway compliance.
+
+    Args:
+        user_id: The user's ID
+        token_type: Type of token ('access', 'refresh', 'mfa')
+        user_type: User type for gateway compliance ('provider', 'patient', 'operations')
+
+    Returns:
+        Tuple of (token_string, expires_at_datetime)
     """
     now = timezone.now()
-    
+
     # Set token lifetime based on type
     if token_type == 'access':
         lifetime = timedelta(minutes=settings.JWT_ACCESS_TOKEN_LIFETIME)
@@ -103,44 +182,63 @@ def create_token(user_id: str, token_type: str = 'access') -> Tuple[str, datetim
         lifetime = timedelta(minutes=settings.JWT_MFA_TOKEN_LIFETIME)
     else:  # refresh token
         lifetime = timedelta(minutes=settings.JWT_REFRESH_TOKEN_LIFETIME)
-    
+
     expires_at = now + lifetime
-    
+
     # Generate unique token ID for blacklisting capability
     import uuid
     token_jti = str(uuid.uuid4())
 
-    # Create the token payload
+    # Create the token payload with user_type for gateway compliance
     payload = {
         'sub': str(user_id),  # subject (user id)
+        'user_type': user_type,  # Gateway compliance: user type
         'type': token_type,
         'iat': now.timestamp(),  # issued at
         'exp': expires_at.timestamp(),  # expiration time
         'jti': token_jti,  # JWT ID for blacklisting
     }
-    
+
+    # Get the appropriate secret for the user type
+    jwt_secret = get_jwt_secret_for_user_type(user_type)
+
     # Create the token
     token = jwt.encode(
         payload,
-        settings.JWT_SECRET_KEY,
+        jwt_secret,
         algorithm=settings.JWT_ALGORITHM
     )
-    
+
     return token, expires_at
 
 
 def create_oct_token(user_id: str, organization_id: str, user_email: str = None,
                     user_first_name: str = None, user_last_name: str = None,
-                    user_roles: list = None) -> Tuple[str, datetime]:
+                    user_roles: list = None, branch_id: str = None,
+                    cluster_id: str = None, subscribed_services: list = None) -> Tuple[str, datetime]:
     """
     Create a new Organization Context Token (OCT) for the given user and organization.
-    Enhanced version that includes user details in the token payload.
+    Enhanced version with gateway compliance and organization context.
+
+    Args:
+        user_id: The user's ID
+        organization_id: The organization ID
+        user_email: User's email address
+        user_first_name: User's first name
+        user_last_name: User's last name
+        user_roles: List of user roles within the organization
+        branch_id: Organization branch ID (gateway compliance)
+        cluster_id: Organization cluster ID (gateway compliance)
+        subscribed_services: List of services the organization subscribes to
+
+    Returns:
+        Tuple of (oct_token_string, expires_at_datetime)
     """
     now = timezone.now()
     lifetime = timedelta(minutes=settings.JWT_OCT_LIFETIME)
     expires_at = now + lifetime
 
-    # Create the base token payload
+    # Create the base token payload with gateway compliance fields
     payload = {
         'sub': str(user_id),  # subject (user id)
         'org_id': str(organization_id), # organization id
@@ -159,10 +257,18 @@ def create_oct_token(user_id: str, organization_id: str, user_email: str = None,
     if user_roles:
         payload['user_roles'] = user_roles
 
-    # Create the token
+    # Add gateway compliance organization context
+    if branch_id:
+        payload['branchId'] = str(branch_id)
+    if cluster_id:
+        payload['clusterId'] = str(cluster_id)
+    if subscribed_services:
+        payload['subscribedServices'] = subscribed_services
+
+    # Create the token using separate OCT secret for gateway compliance
     token = jwt.encode(
         payload,
-        settings.JWT_SECRET_KEY,
+        get_oct_secret(),
         algorithm=settings.JWT_ALGORITHM
     )
 

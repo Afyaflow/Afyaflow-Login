@@ -145,8 +145,8 @@ class BaseSocialAuthMutation(graphene.Mutation):
                 except Exception as e:
                     logger.error(f"Failed to send MFA SMS to {user.phone_number}: {e}")
         
-        # Create a short-lived MFA token.
-        mfa_token, _ = create_token(user.id, token_type='mfa')
+        # Create a short-lived MFA token with user type for gateway compliance.
+        mfa_token, _ = create_token(user.id, token_type='mfa', user_type=user.user_type)
 
         # Return the challenge payload to the client (without access/refresh tokens).
         challenge_payload = AuthPayloadType(

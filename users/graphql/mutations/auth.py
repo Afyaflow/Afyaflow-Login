@@ -205,8 +205,8 @@ class LoginMutation(graphene.Mutation):
             if "SMS" in enabled_methods:
                 send_sms(recipient=user.phone_number, message=message_context)
 
-        # 2. Create a short-lived MFA token.
-        mfa_token, _ = create_token(user.id, token_type='mfa')
+        # 2. Create a short-lived MFA token with user type for gateway compliance.
+        mfa_token, _ = create_token(user.id, token_type='mfa', user_type=user.user_type)
 
         # 3. Return the challenge payload to the client (without access/refresh tokens).
         challenge_payload = AuthPayloadType(
@@ -290,7 +290,7 @@ class RefreshTokenMutation(graphene.Mutation):
             )
             
             from ...authentication import create_token
-            new_access_token_str, _ = create_token(token_obj.user.id, token_type='access')
+            new_access_token_str, _ = create_token(token_obj.user.id, token_type='access', user_type=token_obj.user.user_type)
             logger.info(f"Access token refreshed for user {token_obj.user.email}")
             return RefreshTokenMutation(access_token=new_access_token_str, errors=None)
             

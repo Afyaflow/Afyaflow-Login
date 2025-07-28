@@ -210,11 +210,11 @@ def create_auth_payload(user, mfa_required=False, mfa_token=None, enabled_mfa_me
 
     # 3. If MFA is not required, generate and add tokens
     if not mfa_required:
-        # Create access token
-        access_token_str, _ = create_token(user.id, token_type='access')
-        
-        # Create and store refresh token
-        refresh_token_str, refresh_expires_at = create_token(user.id, token_type='refresh')
+        # Create access token with user type for gateway compliance
+        access_token_str, _ = create_token(user.id, token_type='access', user_type=user.user_type)
+
+        # Create and store refresh token with user type for gateway compliance
+        refresh_token_str, refresh_expires_at = create_token(user.id, token_type='refresh', user_type=user.user_type)
         
         # Store the refresh token in the database
         RefreshToken.objects.create(
