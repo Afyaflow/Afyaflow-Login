@@ -1,6 +1,6 @@
 # AfyaFlow Auth Service API Documentation (GraphQL)
 
-This document provides comprehensive documentation for the AfyaFlow Auth Service GraphQL API. It includes all available queries, mutations, types, and examples for user authentication, multi-factor authentication, profile management, and social authentication.
+This document provides comprehensive documentation for the AfyaFlow Auth Service GraphQL API. It includes all available queries, mutations, types, and examples for user authentication, multi-factor authentication, profile management, social authentication, and the new gateway-compliant features.
 
 ---
 
@@ -9,12 +9,17 @@ This document provides comprehensive documentation for the AfyaFlow Auth Service
 The AfyaFlow Auth Service provides a complete authentication and user management solution with the following features:
 
 ### Core Features
+- **Multi-User Type System** - Support for providers, patients, and operations users
 - **User Registration & Login** - Email/password authentication with email verification
+- **Patient Passwordless Authentication** - Phone/email + OTP authentication for patients
 - **Social Authentication** - Google, Microsoft, and LinkedIn OAuth2 integration
 - **Multi-Factor Authentication (MFA)** - TOTP (Authenticator apps), SMS, and Email MFA
-- **JWT Token Management** - Access tokens, refresh tokens, and organization-scoped tokens
+- **Gateway-Compliant JWT System** - User-type-specific secrets and enhanced security
+- **Dual-Role Support** - Providers can access patient services seamlessly
+- **Service-to-Service Authentication** - X-Service-Auth-ID header support
 - **Profile Management** - User profile updates, password changes, and account management
 - **Phone Number Management** - Add and verify phone numbers for SMS MFA
+- **Email Management** - Add real emails for phone-only users
 - **Password Reset** - Secure password reset with OTP verification
 
 ### GraphQL Endpoint
@@ -25,15 +30,41 @@ The AfyaFlow Auth Service provides a complete authentication and user management
 
 ## 🔐 Authentication & Authorization
 
+### User Types
+
+The AfyaFlow system supports three distinct user types, each with specific authentication requirements:
+
+#### Provider Users (Healthcare Professionals)
+- **User Type**: `provider`
+- **Authentication**: Email/password + optional MFA
+- **JWT Secret**: `PROVIDER_AUTH_TOKEN_SECRET`
+- **Organization Context**: Required for most operations (OCT)
+- **Dual-Role**: Can access patient services when enabled
+
+#### Patient Users
+- **User Type**: `patient`
+- **Authentication**: Phone/email + OTP (passwordless ONLY)
+- **JWT Secret**: `PATIENT_AUTH_TOKEN_SECRET`
+- **Organization Context**: Not used
+- **Features**: Passwordless authentication, smart email placeholders, no passwords required
+
+#### Operations Users (Admin/Support)
+- **User Type**: `operations`
+- **Authentication**: Email/password + optional MFA
+- **JWT Secret**: `OPERATIONS_AUTH_TOKEN_SECRET`
+- **Organization Context**: Not used
+- **Access**: System-wide or cross-tenant
+
 ### JWT Token System
 
-The service uses a dual-token JWT system for authentication:
+The service uses a gateway-compliant JWT system with user-type-specific secrets:
 
 #### Access Tokens
 - **Purpose**: Authenticate API requests
 - **Lifetime**: 30 minutes (configurable)
 - **Usage**: Include in `Authorization` header as `Bearer <token>`
-- **Contains**: User ID, permissions, expiration
+- **Contains**: User ID, user_type, permissions, current_context (for dual-role)
+- **Secrets**: Different secret per user type for enhanced security
 
 #### Refresh Tokens
 - **Purpose**: Obtain new access tokens without re-authentication
@@ -42,18 +73,40 @@ The service uses a dual-token JWT system for authentication:
 - **Usage**: Use with `refreshToken` mutation
 
 #### Organization Context Tokens (OCT)
-- **Purpose**: Access organization-specific resources
+- **Purpose**: Access organization-specific resources (providers only)
 - **Lifetime**: Same as access tokens
 - **Usage**: Obtained via `getScopedAccessToken` mutation
 - **Contains**: User permissions within specific organization
 
-### Authentication Flow
+#### Service Authentication
+- **Purpose**: Service-to-service communication
+- **Usage**: Include `X-Service-Auth-ID` header
+- **Format**: Service account ID (e.g., `billing-svc-123abc`)
+- **Validation**: Against gateway's service account registry
 
+### Authentication Flows
+
+#### Provider Authentication Flow
 ```
-1. User registers/logs in → Receives access + refresh tokens
+1. Provider registers/logs in → Receives access + refresh tokens (PROVIDER_AUTH_TOKEN_SECRET)
 2. Use access token for API requests
 3. When access token expires → Use refresh token to get new access token
 4. For organization operations → Get OCT with getScopedAccessToken
+5. For patient services → Enable patient profile, get patient-context tokens
+```
+
+#### Patient Authentication Flow (Passwordless Only)
+```
+1. Patient initiates auth with phone/email → Receives OTP
+2. Patient verifies OTP → Receives access + refresh tokens (PATIENT_AUTH_TOKEN_SECRET)
+3. Use access token for API requests
+4. Optional: Add real email to replace placeholder
+```
+
+#### Operations Authentication Flow
+```
+1. Operations user logs in → Receives access + refresh tokens (OPERATIONS_AUTH_TOKEN_SECRET)
+2. Use access token for system-wide operations
 ```
 
 ### Multi-Factor Authentication (MFA)
@@ -89,7 +142,7 @@ When MFA is enabled, login becomes a two-step process:
 
 ### UserType
 
-Represents a user in the AfyaFlow system.
+Represents a user in the AfyaFlow system with enhanced user type support.
 
 ```graphql
 type User {
@@ -97,6 +150,7 @@ type User {
   email: String!
   firstName: String!
   lastName: String!
+  userType: String!  # "provider", "patient", or "operations"
   isActive: Boolean!
   isStaff: Boolean!
   isSuperuser: Boolean!
@@ -106,27 +160,39 @@ type User {
   emailVerified: Boolean!
   phoneNumber: String
   phoneNumberVerified: Boolean!
-  
+
   # MFA Status Fields
   totpMfaEnabled: Boolean!
   smsMfaEnabled: Boolean!
   emailMfaEnabled: Boolean!
+
+  # Dual-Role Support (Providers)
+  patientProfileEnabled: Boolean!
+  patientServicesFirstUsed: DateTime
+
+  # Email Management
+  hasRealEmail: Boolean!  # True if not a placeholder email
+  canReceiveEmail: Boolean!  # True if can send real emails
+  needsRealEmail: Boolean!  # True if should be prompted to add real email
 }
 ```
 
 ### AuthPayloadType
 
-Returned by authentication mutations (login, register, social auth).
+Returned by authentication mutations (login, register, social auth, patient auth).
 
 ```graphql
 type AuthPayload {
   user: User
-  accessToken: String
+  accessToken: String  # Signed with user-type-specific secret
   refreshToken: String
   mfaRequired: Boolean!
   mfaToken: String
   enabledMfaMethods: [String]
   organizationMemberships: [OrganizationMembership]
+
+  # Additional context for dual-role users
+  currentContext: String  # "patient" when provider uses patient services
 }
 ```
 
@@ -178,9 +244,13 @@ query GetCurrentUser {
 
 ## 🔄 Authentication Mutations
 
+### Traditional Authentication (Providers & Operations Only)
+
 ### register
 
-Registers a new user and sends email verification OTP.
+Registers a new provider or operations user and sends email verification OTP.
+
+**Note**: Patients cannot use this mutation - they must use passwordless authentication.
 
 **Arguments:**
 - `email: String!` - User's email address
@@ -191,14 +261,16 @@ Registers a new user and sends email verification OTP.
 
 **Returns:** `AuthPayload`, `errors: [String]`
 
+**User Type**: Always creates `provider` users (hardcoded in current implementation)
+
 ```graphql
-mutation RegisterUser {
+mutation RegisterProvider {
   register(
-    email: "user@example.com"
+    email: "dr.smith@hospital.com"
     password: "SecurePassword123!"
     passwordConfirm: "SecurePassword123!"
-    firstName: "John"    # Required
-    lastName: "Doe"      # Required
+    firstName: "Dr. John"    # Required
+    lastName: "Smith"        # Required
   ) {
     authPayload {
       user {
@@ -206,9 +278,10 @@ mutation RegisterUser {
         email
         firstName
         lastName
+        userType        # Always "provider"
         emailVerified
       }
-      accessToken
+      accessToken  # Signed with PROVIDER_AUTH_TOKEN_SECRET
       refreshToken
     }
     errors
@@ -218,7 +291,9 @@ mutation RegisterUser {
 
 ### login
 
-Authenticates a user with email and password.
+Authenticates a provider or operations user with email and password.
+
+**Note**: Patients cannot use this mutation - they must use passwordless authentication.
 
 **Arguments:**
 - `email: String!` - User's email
@@ -227,11 +302,15 @@ Authenticates a user with email and password.
 **Returns:** `AuthPayload`, `errors: [String]`
 
 ```graphql
-mutation LoginUser {
-  login(email: "user@example.com", password: "password123") {
+mutation LoginProvider {
+  login(email: "dr.smith@hospital.com", password: "password123") {
     authPayload {
-      user { id email }
-      accessToken
+      user {
+        id
+        email
+        userType  # "provider" or "operations"
+      }
+      accessToken  # Signed with appropriate secret based on user type
       refreshToken
       mfaRequired
       mfaToken
@@ -322,6 +401,119 @@ mutation GetOrgToken {
     organization { id name }
     permissions
     errors
+  }
+}
+```
+
+---
+
+## 📱 Patient Passwordless Authentication
+
+**Important**: Patients can ONLY use passwordless authentication. They cannot register or login with passwords.
+
+### initiatePatientAuth
+
+Initiates passwordless authentication for patients using phone number or email. This is the ONLY way patients can register or login.
+
+**Arguments:**
+- `identifier: String!` - Phone number (E.164 format) or email address
+- `firstName: String` - First name (required for new users)
+- `lastName: String` - Last name (required for new users)
+
+**Returns:** `success: Boolean`, `message: String`, `isNewUser: Boolean`
+
+```graphql
+mutation InitiatePatientAuth {
+  initiatePatientAuth(
+    identifier: "+254799275131"  # or "patient@example.com"
+    firstName: "John"            # Required for new users
+    lastName: "Patient"          # Required for new users
+  ) {
+    success
+    message
+    isNewUser  # True if this creates a new account
+  }
+}
+```
+
+### completePatientAuth
+
+Completes passwordless authentication by verifying the OTP code.
+
+**Arguments:**
+- `identifier: String!` - Same identifier used in initiate step
+- `otpCode: String!` - 6-digit OTP code received via SMS/email
+
+**Returns:** `AuthPayload`, `errors: [String]`
+
+```graphql
+mutation CompletePatientAuth {
+  completePatientAuth(
+    identifier: "+254799275131"
+    otpCode: "123456"
+  ) {
+    authPayload {
+      user {
+        id
+        email          # May be placeholder for phone-only users
+        userType       # Always "patient"
+        hasRealEmail   # False for phone-only users
+        needsRealEmail # True if should add real email
+      }
+      accessToken      # Signed with PATIENT_AUTH_TOKEN_SECRET
+      refreshToken
+    }
+    errors
+  }
+}
+```
+
+### Patient Email Management
+
+For phone-only patients who want to add a real email address:
+
+#### addEmail
+
+Adds a real email address for phone-only users.
+
+**Authentication**: Required (patient with placeholder email)
+
+**Arguments:**
+- `email: String!` - Real email address to add
+
+**Returns:** `success: Boolean`, `message: String`, `verificationRequired: Boolean`
+
+```graphql
+mutation AddRealEmail {
+  addEmail(email: "patient@gmail.com") {
+    success
+    message
+    verificationRequired  # Always true
+  }
+}
+```
+
+#### verifyAddEmail
+
+Verifies and completes email addition.
+
+**Authentication**: Required
+
+**Arguments:**
+- `otpCode: String!` - OTP code from email
+
+**Returns:** `success: Boolean`, `message: String`, `user: User`
+
+```graphql
+mutation VerifyAddEmail {
+  verifyAddEmail(otpCode: "123456") {
+    success
+    message
+    user {
+      email          # Now the real email
+      hasRealEmail   # Now true
+      canReceiveEmail # Now true
+    }
   }
 }
 ```
@@ -865,13 +1057,25 @@ mutation DisableSMSMFA {
 
 ## 🔄 Common Usage Patterns
 
-### Complete Registration Flow
+### Provider Registration Flow (Email/Password)
 
 ```graphql
-# 1. Register user
+# 1. Register provider (only providers and operations can use this)
 mutation {
-  register(email: "user@example.com", password: "password", passwordConfirm: "password") {
-    authPayload { user { id } accessToken }
+  register(
+    email: "dr.smith@hospital.com"
+    password: "SecurePass123!"
+    passwordConfirm: "SecurePass123!"
+    firstName: "Dr. John"
+    lastName: "Smith"
+  ) {
+    authPayload {
+      user {
+        id
+        userType  # Always "provider" (hardcoded)
+      }
+      accessToken  # PROVIDER_AUTH_TOKEN_SECRET
+    }
     errors
   }
 }
@@ -883,6 +1087,110 @@ mutation {
     errors
   }
 }
+```
+
+### Patient Registration/Login Flow (Passwordless Only)
+
+```graphql
+# 1. Initiate patient auth with phone (ONLY way for patients to register/login)
+mutation {
+  initiatePatientAuth(
+    identifier: "+254799275131"  # Phone or email
+    firstName: "John"            # Required for new users
+    lastName: "Patient"          # Required for new users
+  ) {
+    success
+    message
+    isNewUser  # true for new registration, false for existing user login
+  }
+}
+
+# 2. Complete auth with OTP (user receives SMS/email)
+mutation {
+  completePatientAuth(
+    identifier: "+254799275131"
+    otpCode: "123456"
+  ) {
+    authPayload {
+      user {
+        id
+        userType        # Always "patient"
+        email          # "phone.254799275131@afyaflow.app" (placeholder)
+        hasRealEmail   # false (placeholder email)
+        needsRealEmail # true (should add real email)
+      }
+      accessToken      # PATIENT_AUTH_TOKEN_SECRET
+      refreshToken
+    }
+    errors
+  }
+}
+
+# 3. Optional: Add real email (recommended for phone-only users)
+mutation {
+  addEmail(email: "john@gmail.com") {
+    success
+    message
+    verificationRequired  # Always true
+  }
+}
+
+# 4. Verify real email
+mutation {
+  verifyAddEmail(otpCode: "654321") {
+    success
+    message
+    user {
+      email          # "john@gmail.com" (now real email)
+      hasRealEmail   # true
+      canReceiveEmail # true
+    }
+  }
+}
+```
+
+### Provider Using Patient Services Flow (Dual-Role)
+
+```graphql
+# 1. Provider logs in normally with email/password
+mutation {
+  login(email: "dr.smith@hospital.com", password: "password") {
+    authPayload {
+      user {
+        userType              # "provider"
+        patientProfileEnabled # false (initially)
+      }
+      accessToken  # PROVIDER_AUTH_TOKEN_SECRET
+    }
+  }
+}
+
+# 2. Provider uses patient auth to enable patient services
+mutation {
+  initiatePatientAuth(identifier: "dr.smith@hospital.com") {
+    success
+    message  # "OTP sent to your email"
+  }
+}
+
+# 3. Complete patient auth (enables dual-role access)
+mutation {
+  completePatientAuth(
+    identifier: "dr.smith@hospital.com"
+    otpCode: "123456"
+  ) {
+    authPayload {
+      user {
+        userType              # "provider" (actual user type unchanged)
+        patientProfileEnabled # true (now enabled for patient services)
+      }
+      accessToken             # PROVIDER_AUTH_TOKEN_SECRET with current_context: "patient"
+      currentContext          # "patient" (indicates current operating context)
+    }
+  }
+}
+
+# Note: Provider can now access patient services while maintaining provider identity
 ```
 
 ### Complete MFA Setup Flow
@@ -1097,13 +1405,21 @@ mutation {
 
 ### Complete Mutation List
 
-#### Authentication & Registration
-- `register` - User registration (firstName/lastName required)
-- `login` - User login with optional MFA
+#### Authentication & Registration (Providers & Operations Only)
+- `register` - Provider/operations registration (firstName/lastName required)
+- `login` - Provider/operations login with optional MFA
 - `verifyMfa` - Complete MFA verification
 - `refreshToken` - Get new access token
 - `logout` - Invalidate refresh token
-- `getScopedAccessToken` - Get organization-scoped token
+- `getScopedAccessToken` - Get organization-scoped token (providers only)
+
+#### Patient Authentication (Passwordless Only)
+- `initiatePatientAuth` - Start passwordless auth/registration for patients
+- `completePatientAuth` - Complete passwordless auth with OTP
+
+#### Patient Email Management
+- `addEmail` - Add real email for phone-only patients
+- `verifyAddEmail` - Verify and complete email addition
 
 #### Social Authentication
 - `loginWithGoogle` - Google OAuth2 login
@@ -1142,13 +1458,55 @@ mutation {
 - `verifySmsMfaSetup` - Complete SMS MFA
 - `disableSmsMfa` - Disable SMS MFA
 
-### Key Requirements
+### Key Requirements & Features
+
+#### User Type System
+- **Provider Users**: Email/password auth, organization context, dual-role support
+- **Patient Users**: Passwordless auth ONLY (phone/email + OTP), no organization context
+- **Operations Users**: Email/password auth, system-wide access
+
+#### Gateway Compliance
+- **User-Type-Specific Secrets**: Different JWT secrets per user type
+- **Service Authentication**: X-Service-Auth-ID header support
+- **Context Preservation**: current_context field for dual-role users
+
+#### Security & Validation
 - **Names Required**: firstName and lastName are mandatory for registration
 - **Phone Format**: E.164 format required (+1234567890)
 - **Email Verification**: Consistent across all authentication methods
 - **MFA Dependencies**: SMS MFA requires verified phone number
-- **Security**: Password required for phone number removal
+- **Password Protection**: Password required for sensitive operations
+
+#### Smart Email Management
+- **Placeholder Emails**: Phone-only users get professional placeholders
+- **Email Upgrade Path**: Phone-only users can add real emails
+- **Email Detection**: System knows real vs placeholder emails
 
 ---
 
-*This documentation reflects the current implementation as of the latest update. For the most up-to-date schema, use GraphQL introspection or the GraphiQL interface.*
+## 🚀 New Features Summary
+
+### Gateway-Compliant JWT System
+- **User-type-specific secrets** for enhanced security
+- **Multi-secret validation** for backward compatibility
+- **Service authentication** support via X-Service-Auth-ID header
+
+### Patient Passwordless Authentication
+- **Phone/email + OTP** authentication for patients (ONLY authentication method)
+- **No passwords required** - completely passwordless system
+- **Smart email placeholders** for phone-only users
+- **Real email upgrade path** with verification
+
+### Dual-Role Support
+- **Providers can access patient services** seamlessly
+- **Context-aware tokens** with current_context field
+- **Automatic patient profile enablement**
+
+### Enhanced User Management
+- **Three distinct user types** (provider, patient, operations)
+- **User type validation** and appropriate token signing
+- **Comprehensive email management** for all user types
+
+---
+
+*This documentation reflects the current implementation with all recent enhancements including gateway compliance, patient passwordless authentication, dual-role support, and enhanced JWT security. For the most up-to-date schema, use GraphQL introspection or the GraphiQL interface.*
