@@ -45,6 +45,10 @@ from .mutations.patient_auth import (
     InitiatePatientAuthMutation,
     CompletePatientAuthMutation,
 )
+from .mutations.email_update import (
+    AddEmailMutation,
+    VerifyAddEmailMutation,
+)
 
 # Then import queries
 from .queries import UserQuery
@@ -99,6 +103,10 @@ class UserMutation(graphene.ObjectType):
     # Patient Passwordless Authentication
     initiate_patient_auth = InitiatePatientAuthMutation.Field(description="Initiates passwordless authentication for patients by sending an OTP.")
     complete_patient_auth = CompletePatientAuthMutation.Field(description="Completes passwordless authentication for patients by verifying the OTP.")
+
+    # Email Management (Phone-only users)
+    add_email = AddEmailMutation.Field(description="Add real email address for phone-only users.")
+    verify_add_email = VerifyAddEmailMutation.Field(description="Verify OTP and complete email addition for phone-only users.")
 
 
 # Build the federated schema

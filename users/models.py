@@ -75,6 +75,9 @@ class User(AbstractUser):
     patient_profile_enabled = models.BooleanField(default=False, help_text="Whether this user can access patient services")
     patient_services_first_used = models.DateTimeField(null=True, blank=True, help_text="When user first accessed patient services")
 
+    # Email update support
+    pending_email = models.EmailField(null=True, blank=True, help_text="Email address pending verification")
+
     # Password Reset fields
     password_reset_token = models.CharField(max_length=128, null=True, blank=True)
     password_reset_token_expires_at = models.DateTimeField(null=True, blank=True)
@@ -127,6 +130,37 @@ class User(AbstractUser):
             self.save(update_fields=['patient_profile_enabled', 'patient_services_first_used'])
             return True
         return False
+
+    @property
+    def has_real_email(self):
+        """Check if user has a real email address (not a generated placeholder)."""
+        if not self.email:
+            return False
+        # Check for various placeholder patterns
+        placeholder_patterns = [
+            '@temp.local',
+            '@placeholder.local',
+            '@afyaflow.app',
+            '@noemail.afyaflow'
+        ]
+        return not any(pattern in self.email for pattern in placeholder_patterns)
+
+    @property
+    def can_receive_email(self):
+        """Check if we can send real emails to this user."""
+        return self.has_real_email
+
+    @property
+    def display_contact(self):
+        """Get the primary contact method for display."""
+        if self.has_real_email:
+            return self.email
+        return self.phone_number or self.email
+
+    @property
+    def needs_real_email(self):
+        """Check if user should be prompted to add a real email."""
+        return not self.has_real_email and self.phone_number
 
     # User type helper methods
     def is_patient(self):

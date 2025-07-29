@@ -309,11 +309,9 @@ class CompletePatientAuthMutation(graphene.Mutation):
                     user_data['email'] = normalized_identifier
                     user_data['email_verified'] = True  # Email verified via OTP
                 else:  # phone
-                    # For phone-only registration, we need a placeholder email
-                    # This is a design decision - you might want to handle this differently
-                    import uuid
-                    temp_uuid = str(uuid.uuid4())[:8]
-                    user_data['email'] = f"patient_{temp_uuid}@placeholder.local"
+                    # For phone-only registration, generate a smart placeholder email
+                    normalized_phone = normalized_identifier.replace('+', '').replace('-', '')
+                    user_data['email'] = f"phone.{normalized_phone}@afyaflow.app"
                     user_data['phone_number'] = normalized_identifier
                     user_data['phone_number_verified'] = True
                 
