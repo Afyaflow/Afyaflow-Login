@@ -130,6 +130,55 @@ class JWTAuthentication(authentication.BaseAuthentication):
         # If we get here, none of the secrets worked
         raise last_error or JWTError("Unable to decode token with any available secret")
 
+    def authenticate_token(self, token: str) -> Tuple[User, dict]:
+        """
+        Authenticate a user from a raw token string.
+        This is used by the token introspection endpoint for service-to-service authentication.
+
+        Returns:
+            Tuple[User, dict]: User object and token payload
+
+        Raises:
+            AuthenticationFailed: If token is invalid or user not found
+        """
+        try:
+            # Decode and validate the token with appropriate secret
+            payload = self._decode_token_with_appropriate_secret(token)
+
+            # Check if token is blacklisted
+            token_jti = payload.get('jti')
+            if token_jti:
+                from .models import BlacklistedToken
+                if BlacklistedToken.objects.filter(token_jti=token_jti).exists():
+                    raise AuthenticationFailed('Token has been revoked')
+
+            # Get user from payload
+            user_id = payload.get('sub')
+            if user_id is None:
+                raise AuthenticationFailed('Invalid token payload')
+
+            # Get the user
+            try:
+                user = User.objects.get(id=user_id)
+            except User.DoesNotExist:
+                raise AuthenticationFailed('User not found')
+
+            # Verify user_type in token matches user's actual type
+            token_user_type = payload.get('user_type')
+            if token_user_type and token_user_type != user.user_type:
+                raise AuthenticationFailed('Token user type mismatch')
+
+            # Check if user is active and not suspended
+            if not user.is_active:
+                raise AuthenticationFailed('User is inactive')
+            if user.is_suspended:
+                raise AuthenticationFailed('User account is suspended')
+
+            return user, payload
+
+        except JWTError as e:
+            raise AuthenticationFailed(f'Invalid token: {str(e)}')
+
     def authenticate_mfa_token(self, token: str) -> Tuple[User, dict]:
         """
         Authenticates a user from a raw MFA token string, bypassing the request header.
