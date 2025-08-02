@@ -98,11 +98,12 @@ class JWTAuthentication(authentication.BaseAuthentication):
         Decode JWT token using the appropriate secret based on user type.
         Since we need to decode to get user_type, we try different secrets.
         """
-        # List of secrets to try (user-type-specific + legacy fallback)
+        # List of secrets to try (user-type-specific + OCT + legacy fallback)
         secrets_to_try = [
             ('provider', settings.PROVIDER_AUTH_TOKEN_SECRET),
             ('patient', settings.PATIENT_AUTH_TOKEN_SECRET),
             ('operations', settings.OPERATIONS_AUTH_TOKEN_SECRET),
+            ('oct', settings.ORG_CONTEXT_TOKEN_SECRET),  # Organization Context Token
             ('legacy', settings.JWT_SECRET_KEY),  # Fallback for old tokens
         ]
 
@@ -115,11 +116,19 @@ class JWTAuthentication(authentication.BaseAuthentication):
                     algorithms=[settings.JWT_ALGORITHM]
                 )
 
-                # If we successfully decoded, verify the user_type matches the secret used
-                token_user_type = payload.get('user_type')
-                if token_user_type and secret_name != 'legacy':
-                    if token_user_type != secret_name:
-                        continue  # Wrong secret for this user type
+                # If we successfully decoded, verify the token type matches the secret used
+                token_type = payload.get('type', payload.get('user_type'))
+
+                if token_type and secret_name != 'legacy':
+                    # For OCT tokens, check if type is 'oct'
+                    if secret_name == 'oct' and token_type == 'oct':
+                        return payload
+                    # For user-type tokens, check if user_type matches
+                    elif secret_name != 'oct' and token_type == secret_name:
+                        return payload
+                    # Wrong secret for this token type
+                    else:
+                        continue
 
                 return payload
 
