@@ -106,19 +106,34 @@ def token_introspect(request):
             # Log successful introspection
             logger.info(f"Token introspection successful for user {user.email} by service {service_account.service_id}")
 
+            # Extract user roles from token (OCT tokens have user_roles field)
+            user_roles = payload.get('user_roles', payload.get('roles', []))
+
+            # Generate permissions based on user roles and user type
+            permissions = []
+            if user_roles:
+                # Basic permissions for all authenticated users
+                permissions.extend(['read', 'write'])
+
+                # Role-based permissions
+                if 'doctor' in user_roles or 'admin' in user_roles:
+                    permissions.extend(['upload', 'download', 'generate_documents', 'extract_text'])
+                if 'admin' in user_roles:
+                    permissions.extend(['admin', 'manage_templates'])
+
             # Return comprehensive user context
             response_data = {
                 "active": True,
                 "user_id": str(user.id),
                 "user_email": user.email,
-                "user_type": payload.get('user_type'),
+                "user_type": user.user_type,  # Get from user model, not token
                 "user_full_name": f"{user.first_name} {user.last_name}".strip(),
                 "first_name": user.first_name,
                 "last_name": user.last_name,
                 "current_context": payload.get('current_context'),
                 "organization_id": payload.get('org_id'),
-                "permissions": payload.get('permissions', []),
-                "user_roles": payload.get('roles', []),
+                "permissions": permissions,
+                "user_roles": user_roles,
                 "expires_at": payload.get('exp'),
                 "token_type": payload.get('type', 'access'),
                 "is_active": user.is_active,
