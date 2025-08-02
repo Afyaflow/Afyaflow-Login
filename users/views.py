@@ -1,7 +1,4 @@
-"""
-REST API views for the AfyaFlow Auth Service.
-Provides token introspection and other service-to-service endpoints.
-"""
+
 
 import json
 import logging
