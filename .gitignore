@@ -78,3 +78,5 @@ auto_cleanup.py
 final_validation_report.json
 cleanup_legacy_code.py
 fix_migrations.py
+docs/
+myenv/
