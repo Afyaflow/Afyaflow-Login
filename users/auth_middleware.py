@@ -33,27 +33,11 @@ class GraphQLJWTMiddleware:
         return self.get_response(request)
 
     def get_user(self, request):
-        logger.debug(f"GraphQL JWT Middleware - Getting user for path: {request.path}")
-
-        # Log request headers for debugging
-        auth_header = request.headers.get('Authorization')
-        logger.debug(f"Authorization header present: {bool(auth_header)}")
-        if auth_header:
-            auth_parts = auth_header.split()
-            logger.debug(f"Auth header parts: {len(auth_parts)}, Type: {auth_parts[0] if auth_parts else 'None'}")
-
-        try:
-            auth_response = self.authenticator.authenticate(request)
-            if auth_response:
-                user, payload = auth_response
-                logger.info(f"GraphQL middleware authenticated user: {user.email}")
-                return user
-            else:
-                logger.debug("GraphQL middleware - No authentication response")
-                return AnonymousUser()
-        except Exception as e:
-            logger.error(f"GraphQL middleware authentication error: {str(e)}")
-            return AnonymousUser()
+        auth_response = self.authenticator.authenticate(request)
+        if auth_response:
+            user, _ = auth_response
+            return user
+        return AnonymousUser()
 
     def resolve(self, next, root, info, **kwargs):
         context = info.context

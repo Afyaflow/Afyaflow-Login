@@ -86,18 +86,8 @@ class InitiateTotpSetupMutation(graphene.Mutation):
 
     @classmethod
     def mutate(cls, root, info):
-        logger.debug("InitiateTotpSetupMutation called")
-
         user = info.context.user
-        logger.debug(f"User from context: {user}, Is authenticated: {user.is_authenticated if hasattr(user, 'is_authenticated') else 'No is_authenticated attr'}")
-
-        if hasattr(user, 'email'):
-            logger.debug(f"User email: {user.email}")
-        else:
-            logger.debug("User object has no email attribute")
-
         if not user.is_authenticated:
-            logger.warning("Unauthenticated user attempted TOTP setup")
             raise GraphQLError("You must be logged in to set up MFA.")
 
         if user.mfa_totp_setup_complete:

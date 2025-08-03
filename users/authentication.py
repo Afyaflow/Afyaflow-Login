@@ -48,83 +48,53 @@ class JWTAuthentication(authentication.BaseAuthentication):
         # Get the Authorization header
         auth_header = request.headers.get('Authorization')
 
-        logger.debug(f"JWT Authentication attempt - Auth header present: {bool(auth_header)}")
-
         if not auth_header:
-            logger.debug("No Authorization header found")
             return None
 
         try:
             # Check if it's a Bearer token
             auth_type, token = auth_header.split()
-            logger.debug(f"Auth type: {auth_type}, Token length: {len(token) if token else 0}")
-
             if auth_type.lower() != 'bearer':
-                logger.warning(f"Invalid auth type: {auth_type}")
                 return None
 
-            # Log token structure for debugging
-            token_parts = token.split('.')
-            logger.debug(f"Token has {len(token_parts)} parts (expected: 3)")
-
             # Decode and validate the token with appropriate secret (gateway compliance)
-            logger.debug("Attempting to decode token with user-type-specific secrets")
             payload = self._decode_token_with_appropriate_secret(token)
-            logger.info(f"Token decoded successfully. User ID: {payload.get('sub')}, User Type: {payload.get('user_type')}, Token Type: {payload.get('type')}")
 
             # Check if token is blacklisted
             token_jti = payload.get('jti')
-            logger.debug(f"Token JTI: {token_jti}")
             if token_jti:
                 from .models import BlacklistedToken
-                is_blacklisted = BlacklistedToken.objects.filter(token_jti=token_jti).exists()
-                logger.debug(f"Token blacklist check: {is_blacklisted}")
-                if is_blacklisted:
-                    logger.warning(f"Blacklisted token attempted: {token_jti}")
+                if BlacklistedToken.objects.filter(token_jti=token_jti).exists():
                     raise AuthenticationFailed('Token has been revoked')
 
             # Get user from payload
             user_id = payload.get('sub')
-            logger.debug(f"Extracted user ID from token: {user_id}")
             if user_id is None:
-                logger.error("Token payload missing 'sub' field")
                 raise AuthenticationFailed('Invalid token payload')
 
             # Get the user
             try:
                 user = User.objects.get(id=user_id)
-                logger.debug(f"User found: {user.email}, User type: {user.user_type}, Active: {user.is_active}, Suspended: {user.is_suspended}")
             except User.DoesNotExist:
-                logger.error(f"User not found for ID: {user_id}")
                 raise AuthenticationFailed('User not found')
 
             # Verify user_type in token matches user's actual type (gateway compliance)
             token_user_type = payload.get('user_type')
-            logger.debug(f"Token user type: {token_user_type}, Actual user type: {user.user_type}")
             if token_user_type and token_user_type != user.user_type:
-                logger.error(f"User type mismatch - Token: {token_user_type}, User: {user.user_type}")
                 raise AuthenticationFailed('Token user type mismatch')
 
             # Check if user is active and not suspended
             if not user.is_active:
-                logger.warning(f"Inactive user attempted login: {user.email}")
                 raise AuthenticationFailed('User is inactive')
             if user.is_suspended:
-                logger.warning(f"Suspended user attempted login: {user.email}")
                 raise AuthenticationFailed('User account is suspended')
 
-            logger.info(f"JWT authentication successful for user: {user.email}")
             return user, payload
 
-        except JWTError as e:
-            logger.error(f"JWT decode error: {str(e)}")
+        except JWTError:
             raise AuthenticationFailed('Invalid token')
-        except ValueError as e:
-            logger.error(f"Authorization header parsing error: {str(e)}")
+        except ValueError:
             raise AuthenticationFailed('Invalid authorization header')
-        except Exception as e:
-            logger.error(f"Unexpected authentication error: {str(e)}")
-            raise AuthenticationFailed('Authentication failed')
 
     def _decode_token_with_appropriate_secret(self, token: str) -> dict:
         """
@@ -140,20 +110,10 @@ class JWTAuthentication(authentication.BaseAuthentication):
             ('legacy', settings.JWT_SECRET_KEY),  # Fallback for old tokens
         ]
 
-        logger.debug(f"Attempting to decode token with {len(secrets_to_try)} different secrets")
-
-        # Log available secrets (first 10 chars only for security)
-        for secret_name, secret in secrets_to_try:
-            secret_preview = secret[:10] + "..." if secret and len(secret) > 10 else "None"
-            logger.debug(f"Secret '{secret_name}': {secret_preview}")
-
         last_error = None
-        for i, (secret_name, secret) in enumerate(secrets_to_try, 1):
+        for secret_name, secret in secrets_to_try:
             try:
-                logger.debug(f"Attempt {i}/{len(secrets_to_try)}: Trying secret '{secret_name}'")
-
                 if not secret:
-                    logger.warning(f"Secret '{secret_name}' is None or empty")
                     continue
 
                 payload = jwt.decode(
@@ -162,42 +122,28 @@ class JWTAuthentication(authentication.BaseAuthentication):
                     algorithms=[settings.JWT_ALGORITHM]
                 )
 
-                logger.debug(f"Successfully decoded with '{secret_name}' secret. Payload: {payload}")
-
                 # If we successfully decoded, verify the token type matches the secret used
                 token_type = payload.get('type', payload.get('user_type'))
                 user_type = payload.get('user_type')
 
-                logger.debug(f"Token validation - Secret: {secret_name}, Token type: {token_type}, User type: {user_type}")
-
                 if token_type and secret_name != 'legacy':
                     # For OCT tokens, check if type is 'oct'
                     if secret_name == 'oct' and token_type == 'oct':
-                        logger.info(f"OCT token validated successfully with '{secret_name}' secret")
                         return payload
                     # For user-type tokens, check if user_type matches
                     elif secret_name != 'oct' and user_type == secret_name:
-                        logger.info(f"User-type token validated successfully with '{secret_name}' secret")
                         return payload
                     # Wrong secret for this token type
                     else:
-                        logger.debug(f"Secret '{secret_name}' decoded token but type mismatch. Expected: {secret_name}, Got type: {token_type}, Got user_type: {user_type}")
                         continue
 
-                logger.info(f"Legacy token validated successfully with '{secret_name}' secret")
                 return payload
 
             except JWTError as e:
-                logger.debug(f"Failed to decode with '{secret_name}' secret: {str(e)}")
-                last_error = e
-                continue
-            except Exception as e:
-                logger.error(f"Unexpected error with '{secret_name}' secret: {str(e)}")
                 last_error = e
                 continue
 
         # If we get here, none of the secrets worked
-        logger.error(f"Failed to decode token with any of {len(secrets_to_try)} secrets. Last error: {last_error}")
         raise last_error or JWTError("Unable to decode token with any available secret")
 
     def authenticate_token(self, token: str) -> Tuple[User, dict]:
@@ -254,45 +200,30 @@ class JWTAuthentication(authentication.BaseAuthentication):
         Authenticates a user from a raw MFA token string, bypassing the request header.
         This is specifically for the second step of the MFA login flow.
         """
-        logger.debug(f"MFA token authentication attempt. Token length: {len(token) if token else 0}")
-
         try:
             # Use the same multi-secret decoding logic for MFA tokens
-            logger.debug("Attempting to decode MFA token with user-type-specific secrets")
             payload = self._decode_token_with_appropriate_secret(token)
-            logger.info(f"MFA token decoded successfully. User ID: {payload.get('sub')}, User Type: {payload.get('user_type')}, Token Type: {payload.get('type')}")
 
             user_id = payload.get('sub')
             if user_id is None:
-                logger.error("MFA token payload missing 'sub' field")
                 raise AuthenticationFailed('Invalid MFA token payload.')
 
             user = User.objects.get(id=user_id)
-            logger.debug(f"MFA user found: {user.email}, User type: {user.user_type}, Active: {user.is_active}, Suspended: {user.is_suspended}")
 
             # Verify user_type in token matches user's actual type
             token_user_type = payload.get('user_type')
-            logger.debug(f"MFA token user type: {token_user_type}, Actual user type: {user.user_type}")
             if token_user_type and token_user_type != user.user_type:
-                logger.error(f"MFA user type mismatch - Token: {token_user_type}, User: {user.user_type}")
                 raise AuthenticationFailed('Token user type mismatch')
 
             if not user.is_active or user.is_suspended:
-                logger.warning(f"MFA attempted for inactive/suspended user: {user.email}")
                 raise AuthenticationFailed('User account is inactive or suspended.')
 
-            logger.info(f"MFA token authentication successful for user: {user.email}")
             return user, payload
 
-        except JWTError as e:
-            logger.error(f"MFA JWT decode error: {str(e)}")
+        except JWTError:
             raise AuthenticationFailed('Invalid or expired MFA token.')
         except User.DoesNotExist:
-            logger.error(f"MFA user not found for ID: {user_id}")
             raise AuthenticationFailed('User not found.')
-        except Exception as e:
-            logger.error(f"Unexpected MFA authentication error: {str(e)}")
-            raise AuthenticationFailed('MFA authentication failed')
 
 
 def create_token(user_id: str, token_type: str = 'access', user_type: str = None,
@@ -309,8 +240,6 @@ def create_token(user_id: str, token_type: str = 'access', user_type: str = None
     Returns:
         Tuple of (token_string, expires_at_datetime)
     """
-    logger.debug(f"Creating token - User ID: {user_id}, Type: {token_type}, User Type: {user_type}, Context: {current_context}")
-
     now = timezone.now()
 
     # Set token lifetime based on type
@@ -322,7 +251,6 @@ def create_token(user_id: str, token_type: str = 'access', user_type: str = None
         lifetime = timedelta(minutes=settings.JWT_REFRESH_TOKEN_LIFETIME)
 
     expires_at = now + lifetime
-    logger.debug(f"Token will expire at: {expires_at}")
 
     # Generate unique token ID for blacklisting capability
     import uuid
@@ -343,16 +271,8 @@ def create_token(user_id: str, token_type: str = 'access', user_type: str = None
         payload['current_context'] = current_context
         payload['original_user_type'] = user_type
 
-    logger.debug(f"Token payload: {payload}")
-
     # Get the appropriate secret for the user type
-    try:
-        jwt_secret = get_jwt_secret_for_user_type(user_type)
-        secret_preview = jwt_secret[:10] + "..." if jwt_secret and len(jwt_secret) > 10 else "None"
-        logger.debug(f"Using secret for user_type '{user_type}': {secret_preview}")
-    except Exception as e:
-        logger.error(f"Failed to get JWT secret for user_type '{user_type}': {str(e)}")
-        raise
+    jwt_secret = get_jwt_secret_for_user_type(user_type)
 
     # Create the token
     token = jwt.encode(
@@ -361,7 +281,6 @@ def create_token(user_id: str, token_type: str = 'access', user_type: str = None
         algorithm=settings.JWT_ALGORITHM
     )
 
-    logger.info(f"Token created successfully - Type: {token_type}, User Type: {user_type}, Length: {len(token)}")
     return token, expires_at
 
 
