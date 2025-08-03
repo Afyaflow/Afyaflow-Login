@@ -81,6 +81,7 @@ class AuthPayloadType(graphene.ObjectType):
     mfa_token = graphene.String(name="mfaToken", required=False, description="A short-lived token to use in the verifyMfa mutation. Provided only when MFA is required.")
     enabled_mfa_methods = graphene.List(graphene.String, name="enabledMfaMethods", required=False, description="A list of MFA methods enabled for the user (e.g., ['TOTP', 'SMS']).")
     recommended_mfa_method = graphene.String(name="recommendedMfaMethod", required=False, description="The recommended (most secure) MFA method for the user.")
+    mfa_otp_sent = graphene.Boolean(name="mfaOtpSent", required=False, description="True if an OTP was automatically sent for the recommended method.")
 
     organization_memberships = graphene.List(OrganizationMembershipType, name="organizationMemberships", required=False, description="A list of organizations the user is a member of.")
     errors = graphene.List(graphene.String, description="List of error messages if any operation within the mutation fails.")

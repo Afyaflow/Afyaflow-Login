@@ -189,7 +189,7 @@ class LoginMutation(graphene.Mutation):
             auth_data = create_auth_payload(user, mfa_required=False)
             return LoginMutation(auth_payload=AuthPayloadType(**auth_data))
 
-        # MFA is active, so we start the method selection challenge.
+        # MFA is active, so we start the MFA challenge.
 
         # 1. Get recommended method (most secure first)
         recommended_method = get_recommended_mfa_method(enabled_methods)
@@ -197,13 +197,41 @@ class LoginMutation(graphene.Mutation):
         # 2. Create a short-lived MFA token with user type for gateway compliance.
         mfa_token, _ = create_token(user.id, token_type='mfa', user_type=user.user_type)
 
-        # 3. Return the method selection challenge payload to the client (without access/refresh tokens).
+        # 3. Auto-send OTP for recommended method (better UX)
+        auto_send_success = False
+        if recommended_method in ["EMAIL", "SMS"]:
+            try:
+                if recommended_method == "EMAIL":
+                    otp_code = generate_otp()
+                    set_user_otp(user, otp_code, purpose="mfa_login")
+                    send_templated_email(
+                        user.email,
+                        'mfa_login_otp',
+                        {'otp_code': otp_code, 'user_name': user.first_name or user.email}
+                    )
+                    auto_send_success = True
+                    logger.info(f"Auto-sent MFA login OTP via email to {user.email}")
+
+                elif recommended_method == "SMS" and user.phone_number_verified:
+                    otp_code = generate_otp()
+                    set_user_otp(user, otp_code, purpose="mfa_login")
+                    send_sms(user.phone_number, f"Your AfyaFlow login code: {otp_code}")
+                    auto_send_success = True
+                    logger.info(f"Auto-sent MFA login OTP via SMS to {user.phone_number}")
+
+            except Exception as e:
+                logger.warning(f"Failed to auto-send MFA OTP via {recommended_method}: {str(e)}")
+                # Continue with method selection if auto-send fails
+
+        # 4. Return the MFA challenge payload
         challenge_payload = AuthPayloadType(
             user=user,
             mfa_required=True,
             mfa_token=mfa_token,
             enabled_mfa_methods=enabled_methods,
             recommended_mfa_method=recommended_method,
+            # Add flag to indicate if OTP was auto-sent
+            mfa_otp_sent=auto_send_success,
         )
         logger.info(f"MFA method selection challenge issued for user {user.email}. Available methods: {enabled_methods}, Recommended: {recommended_method}")
         return LoginMutation(auth_payload=challenge_payload)
@@ -211,17 +239,19 @@ class LoginMutation(graphene.Mutation):
 class VerifyMfaMutation(graphene.Mutation):
     """
     Verifies an OTP code using a short-lived MFA token to complete the login process.
+    Now supports optional method parameter for better UX.
     """
     class Arguments:
         mfa_token = graphene.String(required=True)
         otp_code = graphene.String(required=True)
+        method = graphene.String(required=False, description="MFA method used (TOTP, EMAIL, SMS). If not provided, will be determined from token or user's enabled methods.")
 
     auth_payload = graphene.Field(AuthPayloadType)
     errors = graphene.List(graphene.String)
 
     @classmethod
     @transaction.atomic
-    def mutate(cls, root, info, mfa_token, otp_code):
+    def mutate(cls, root, info, mfa_token, otp_code, method=None):
         # 1. Validate the MFA token
         jwt_authenticator = JWTAuthentication()
         try:
@@ -233,12 +263,24 @@ class VerifyMfaMutation(graphene.Mutation):
         if payload.get('type') != 'mfa':
             return cls(auth_payload=None, errors=["Invalid token type provided."])
 
-        # 3. Check if method was selected (required for new flow)
-        selected_method = payload.get('selected_mfa_method')
-        if not selected_method:
-            return cls(auth_payload=None, errors=["MFA method must be selected first. Please use selectMfaMethod mutation."])
+        # 3. Determine which method to use for verification
+        # Priority: 1) method parameter, 2) selected_mfa_method from token, 3) auto-detect from user's enabled methods
+        selected_method = method or payload.get('selected_mfa_method')
 
-        # 4. Verify the provided OTP code based on selected method
+        if not selected_method:
+            # Auto-detect method if not specified (for backward compatibility and auto-send flow)
+            enabled_methods = []
+            if user.mfa_totp_setup_complete: enabled_methods.append("TOTP")
+            if user.mfa_email_enabled: enabled_methods.append("EMAIL")
+            if user.mfa_sms_enabled and user.phone_number_verified: enabled_methods.append("SMS")
+
+            if len(enabled_methods) == 1:
+                selected_method = enabled_methods[0]
+            else:
+                # Multiple methods available but none specified
+                return cls(auth_payload=None, errors=["Multiple MFA methods available. Please specify which method you're using or use selectMfaMethod mutation."])
+
+        # 4. Verify the provided OTP code based on determined method
         is_valid = False
 
         if selected_method == "TOTP":
