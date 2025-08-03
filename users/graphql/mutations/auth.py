@@ -171,6 +171,8 @@ class LoginMutation(graphene.Mutation):
         if user.mfa_email_enabled: enabled_methods.append("EMAIL")
         if user.mfa_sms_enabled and user.phone_number_verified: enabled_methods.append("SMS")
 
+
+
         is_mfa_active = bool(enabled_methods)
 
         if not is_mfa_active:
@@ -199,25 +201,32 @@ class LoginMutation(graphene.Mutation):
 
         # 3. Auto-send OTP for recommended method (better UX)
         auto_send_success = False
+
         if recommended_method in ["EMAIL", "SMS"]:
             try:
                 if recommended_method == "EMAIL":
                     otp_code = generate_otp()
                     set_user_otp(user, otp_code, purpose="mfa_login")
-                    send_templated_email(
-                        user.email,
-                        'mfa_login_otp',
-                        {'otp_code': otp_code, 'user_name': user.first_name or user.email}
+                    email_sent = send_templated_email(
+                        recipient=user.email,
+                        template_id='mfa_otp',  # Use existing template
+                        context={'first_name': user.first_name or "user", 'otp_code': otp_code}
                     )
-                    auto_send_success = True
-                    logger.info(f"Auto-sent MFA login OTP via email to {user.email}")
+                    if email_sent:
+                        auto_send_success = True
+                        logger.info(f"Auto-sent MFA login OTP via email to {user.email}")
+                    else:
+                        logger.warning(f"Failed to auto-send MFA email to {user.email}")
 
                 elif recommended_method == "SMS" and user.phone_number_verified:
                     otp_code = generate_otp()
                     set_user_otp(user, otp_code, purpose="mfa_login")
-                    send_sms(user.phone_number, f"Your AfyaFlow login code: {otp_code}")
-                    auto_send_success = True
-                    logger.info(f"Auto-sent MFA login OTP via SMS to {user.phone_number}")
+                    sms_sent = send_sms(user.phone_number, f"Your AfyaFlow login code: {otp_code}")
+                    if sms_sent:
+                        auto_send_success = True
+                        logger.info(f"Auto-sent MFA login OTP via SMS to {user.phone_number}")
+                    else:
+                        logger.warning(f"Failed to auto-send MFA SMS to {user.phone_number}")
 
             except Exception as e:
                 logger.warning(f"Failed to auto-send MFA OTP via {recommended_method}: {str(e)}")
