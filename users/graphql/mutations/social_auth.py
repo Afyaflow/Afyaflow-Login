@@ -18,6 +18,7 @@ from users.models import User, AuthenticationAttempt
 from ...otp_utils import generate_otp, set_user_otp
 from ...communication_client import send_templated_email, send_sms
 from ...authentication import create_token
+from .mfa import get_recommended_mfa_method
 from ..mutations.auth import get_client_ip
 
 logger = logging.getLogger(__name__)
@@ -122,39 +123,21 @@ class BaseSocialAuthMutation(graphene.Mutation):
             metadata={'mfa_methods': enabled_methods}
         )
 
-        otp = None
-        # Send OTPs if Email or SMS MFA are enabled.
-        if "EMAIL" in enabled_methods or "SMS" in enabled_methods:
-            otp = generate_otp()
-            set_user_otp(user, otp, purpose='mfa_login') # Use a specific purpose
+        # Get recommended method (most secure first)
+        recommended_method = get_recommended_mfa_method(enabled_methods)
 
-            if "EMAIL" in enabled_methods:
-                try:
-                    send_templated_email(
-                        recipient=user.email,
-                        template_id='mfa_otp',
-                        context={"first_name": user.first_name or "user", "otp_code": otp}
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to send MFA email to {user.email}: {e}")
-
-            if "SMS" in enabled_methods:
-                try:
-                    message = f"Your AfyaFlow verification code is: {otp}"
-                    send_sms(recipient=user.phone_number, message=message)
-                except Exception as e:
-                    logger.error(f"Failed to send MFA SMS to {user.phone_number}: {e}")
-        
         # Create a short-lived MFA token with user type for gateway compliance.
         mfa_token, _ = create_token(user.id, token_type='mfa', user_type=user.user_type)
 
-        # Return the challenge payload to the client (without access/refresh tokens).
+        # Return the method selection challenge payload to the client (without access/refresh tokens).
         challenge_payload = AuthPayloadType(
             user=user,
             mfa_required=True,
             mfa_token=mfa_token,
             enabled_mfa_methods=enabled_methods,
+            recommended_mfa_method=recommended_method,
         )
+        logger.info(f"Social auth MFA method selection challenge issued for user {user.email}. Available methods: {enabled_methods}, Recommended: {recommended_method}")
         return cls(auth_payload=challenge_payload, errors=None)
 
 class GoogleLoginMutation(BaseSocialAuthMutation):

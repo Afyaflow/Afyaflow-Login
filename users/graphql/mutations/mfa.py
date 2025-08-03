@@ -7,10 +7,12 @@ from graphql import GraphQLError
 from ...communication_client import send_templated_email, send_sms
 from ...otp_utils import generate_otp, verify_otp, hash_otp, set_user_otp
 from ...models import User
+from ...authentication import JWTAuthentication, create_token
 import logging
 from django.db import transaction
 from django.utils import timezone
 from datetime import timedelta
+from django.core.cache import cache
 
 from ..types import UserType
 
@@ -21,6 +23,53 @@ def _check_user_password(user, password):
     if not user.check_password(password):
         logger.warning(f"Password verification failed for user {user.email}.")
         raise GraphQLError("Invalid password.")
+
+# Helper function to get recommended MFA method (most secure first)
+def get_recommended_mfa_method(available_methods):
+    """
+    Returns the most secure MFA method from available methods.
+    Security order: TOTP > EMAIL > SMS
+    """
+    security_order = ["TOTP", "EMAIL", "SMS"]
+    for method in security_order:
+        if method in available_methods:
+            return method
+    return available_methods[0] if available_methods else None
+
+# Helper function to create enhanced MFA token with selected method
+def create_mfa_token_with_method(user_id, user_type, selected_method=None):
+    """
+    Creates an MFA token with optional selected method information.
+    """
+    from jose import jwt
+    from django.conf import settings
+
+    now = timezone.now()
+    lifetime = timedelta(minutes=settings.JWT_MFA_TOKEN_LIFETIME)
+    expires_at = now + lifetime
+
+    import uuid
+    token_jti = str(uuid.uuid4())
+
+    payload = {
+        'sub': str(user_id),
+        'user_type': user_type,
+        'type': 'mfa',
+        'iat': now.timestamp(),
+        'exp': expires_at.timestamp(),
+        'jti': token_jti,
+    }
+
+    # Add selected method if provided
+    if selected_method:
+        payload['selected_mfa_method'] = selected_method
+
+    # Get the appropriate secret for the user type
+    from ...authentication import get_jwt_secret_for_user_type
+    jwt_secret = get_jwt_secret_for_user_type(user_type)
+
+    token = jwt.encode(payload, jwt_secret, algorithm=settings.JWT_ALGORITHM)
+    return token, expires_at
 
 # --- TOTP (Authenticator App) Mutations ---
 
@@ -532,3 +581,118 @@ class ResendPhoneVerificationMutation(graphene.Mutation):
 
         logger.info(f"Phone verification OTP resent to {user.phone_number} for user {user.email}.")
         return cls(ok=True, message="A new verification code has been sent to your phone.")
+
+
+# --- MFA Method Selection ---
+
+class SelectMfaMethodMutation(graphene.Mutation):
+    """
+    Allows user to select which MFA method to use for current login session.
+    Sends OTP for EMAIL/SMS methods, prepares for TOTP verification.
+    """
+    class Arguments:
+        mfa_token = graphene.String(required=True)
+        selected_method = graphene.String(required=True)
+
+    ok = graphene.Boolean()
+    message = graphene.String()
+    errors = graphene.List(graphene.String)
+    updated_mfa_token = graphene.String()
+
+    @classmethod
+    @transaction.atomic
+    def mutate(cls, root, info, mfa_token, selected_method):
+        # Rate limiting check
+        client_ip = info.context.META.get('REMOTE_ADDR', '127.0.0.1')
+        rate_limit_key = f"mfa_method_selection:{client_ip}"
+
+        # Allow 10 method selections per 5 minutes per IP
+        current_count = cache.get(rate_limit_key, 0)
+        if current_count >= 10:
+            logger.warning(f"Rate limit exceeded for MFA method selection from IP {client_ip}")
+            return cls(ok=False, errors=["Too many method selection attempts. Please try again later."])
+
+        # Increment rate limit counter
+        cache.set(rate_limit_key, current_count + 1, 300)  # 5 minutes
+
+        # 1. Validate the MFA token
+        jwt_authenticator = JWTAuthentication()
+        try:
+            user, payload = jwt_authenticator.authenticate_mfa_token(mfa_token)
+        except Exception as e:
+            logger.warning(f"Invalid MFA token in method selection: {str(e)}")
+            return cls(ok=False, errors=["Invalid or expired MFA token."])
+
+        # 2. Check if the token was for MFA
+        if payload.get('type') != 'mfa':
+            return cls(ok=False, errors=["Invalid token type provided."])
+
+        # 3. Validate selected method is available for user
+        available_methods = user.get_enabled_mfa_methods()
+        if selected_method not in available_methods:
+            logger.warning(f"User {user.email} attempted to select unavailable MFA method: {selected_method}")
+            return cls(ok=False, errors=[f"Selected method '{selected_method}' is not available for your account."])
+
+        # 4. Handle method-specific logic
+        message = ""
+
+        if selected_method == "TOTP":
+            # TOTP doesn't require OTP sending, just prepare for verification
+            message = "Please enter the code from your authenticator app."
+            logger.info(f"User {user.email} selected TOTP for MFA verification.")
+
+        elif selected_method == "EMAIL":
+            # Generate and send email OTP
+            if not user.mfa_email_enabled:
+                return cls(ok=False, errors=["Email MFA is not enabled for your account."])
+
+            otp = generate_otp()
+            set_user_otp(user, otp, purpose='mfa_login')
+
+            try:
+                send_templated_email(
+                    recipient=user.email,
+                    template_id='mfa_otp',
+                    context={"first_name": user.first_name or "user", "otp_code": otp}
+                )
+                message = f"Verification code sent to your email ({user.email[:3]}***@{user.email.split('@')[1]})."
+                logger.info(f"MFA email OTP sent to {user.email} for method selection.")
+            except Exception as e:
+                logger.error(f"Failed to send MFA email to {user.email}: {e}")
+                return cls(ok=False, errors=["Failed to send verification email. Please try a different method."])
+
+        elif selected_method == "SMS":
+            # Generate and send SMS OTP
+            if not user.mfa_sms_enabled or not user.phone_number_verified:
+                return cls(ok=False, errors=["SMS MFA is not available for your account."])
+
+            otp = generate_otp()
+            set_user_otp(user, otp, purpose='mfa_login')
+
+            try:
+                message_text = f"Your AfyaFlow verification code is: {otp}"
+                send_sms(recipient=user.phone_number, message=message_text)
+                masked_phone = f"***-{user.phone_number[-4:]}" if len(user.phone_number) >= 4 else "***"
+                message = f"Verification code sent to your phone ({masked_phone})."
+                logger.info(f"MFA SMS OTP sent to {user.phone_number} for user {user.email}.")
+            except Exception as e:
+                logger.error(f"Failed to send MFA SMS to {user.phone_number}: {e}")
+                return cls(ok=False, errors=["Failed to send verification SMS. Please try a different method."])
+
+        else:
+            return cls(ok=False, errors=["Invalid MFA method selected."])
+
+        # 5. Create updated MFA token with selected method
+        updated_token, _ = create_mfa_token_with_method(
+            user.id,
+            user.user_type,
+            selected_method
+        )
+
+        logger.info(f"User {user.email} successfully selected {selected_method} for MFA verification.")
+        return cls(
+            ok=True,
+            message=message,
+            updated_mfa_token=updated_token,
+            errors=None
+        )

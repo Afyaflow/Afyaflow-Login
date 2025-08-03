@@ -14,6 +14,7 @@ from ...authentication import create_token, JWTAuthentication, create_oct_token
 from ...communication_client import send_templated_email, send_sms
 from ...otp_utils import generate_otp, set_user_otp, verify_otp
 from ...security_middleware import auth_attempt_tracker
+from .mfa import get_recommended_mfa_method
 import pyotp
 
 logger = logging.getLogger(__name__)
@@ -188,34 +189,23 @@ class LoginMutation(graphene.Mutation):
             auth_data = create_auth_payload(user, mfa_required=False)
             return LoginMutation(auth_payload=AuthPayloadType(**auth_data))
 
-        # MFA is active, so we start the two-step challenge.
-        
-        # 1. Send OTPs if Email or SMS MFA are enabled.
-        if "EMAIL" in enabled_methods or "SMS" in enabled_methods:
-            otp = generate_otp()
-            set_user_otp(user, otp)
+        # MFA is active, so we start the method selection challenge.
 
-            message_context = f"Your AfyaFlow verification code is: {otp}"
-            if "EMAIL" in enabled_methods:
-                send_templated_email(
-                    recipient=user.email,
-                    template_id='mfa_otp', # Assumes this template exists
-                    context={"first_name": user.first_name or "user", "otp_code": otp}
-                )
-            if "SMS" in enabled_methods:
-                send_sms(recipient=user.phone_number, message=message_context)
+        # 1. Get recommended method (most secure first)
+        recommended_method = get_recommended_mfa_method(enabled_methods)
 
         # 2. Create a short-lived MFA token with user type for gateway compliance.
         mfa_token, _ = create_token(user.id, token_type='mfa', user_type=user.user_type)
 
-        # 3. Return the challenge payload to the client (without access/refresh tokens).
+        # 3. Return the method selection challenge payload to the client (without access/refresh tokens).
         challenge_payload = AuthPayloadType(
             user=user,
             mfa_required=True,
             mfa_token=mfa_token,
             enabled_mfa_methods=enabled_methods,
+            recommended_mfa_method=recommended_method,
         )
-        logger.info(f"MFA challenge issued for user {user.email}.")
+        logger.info(f"MFA method selection challenge issued for user {user.email}. Available methods: {enabled_methods}, Recommended: {recommended_method}")
         return LoginMutation(auth_payload=challenge_payload)
 
 class VerifyMfaMutation(graphene.Mutation):
@@ -243,24 +233,39 @@ class VerifyMfaMutation(graphene.Mutation):
         if payload.get('type') != 'mfa':
             return cls(auth_payload=None, errors=["Invalid token type provided."])
 
-        # 3. Verify the provided OTP code
-        is_valid = False
-        
-        # Check TOTP from authenticator app
-        if user.mfa_totp_setup_complete:
-            totp = pyotp.TOTP(user.mfa_totp_secret)
-            if totp.verify(otp_code):
-                is_valid = True
+        # 3. Check if method was selected (required for new flow)
+        selected_method = payload.get('selected_mfa_method')
+        if not selected_method:
+            return cls(auth_payload=None, errors=["MFA method must be selected first. Please use selectMfaMethod mutation."])
 
-        # If not valid yet, check Email/SMS OTP
-        if not is_valid and (user.mfa_email_enabled or user.mfa_sms_enabled):
-            if user.mfa_otp and user.mfa_otp_expires_at and timezone.now() < user.mfa_otp_expires_at:
-                if verify_otp(otp_code, user):
+        # 4. Verify the provided OTP code based on selected method
+        is_valid = False
+
+        if selected_method == "TOTP":
+            # Check TOTP from authenticator app
+            if user.mfa_totp_setup_complete:
+                totp = pyotp.TOTP(user.mfa_totp_secret)
+                if totp.verify(otp_code):
                     is_valid = True
-                    # Invalidate the one-time code immediately after use
-                    user.mfa_otp = None
-                    user.mfa_otp_expires_at = None
-                    user.save(update_fields=['mfa_otp', 'mfa_otp_expires_at'])
+                    logger.info(f"TOTP verification successful for user {user.email}")
+                else:
+                    logger.warning(f"TOTP verification failed for user {user.email}")
+            else:
+                return cls(auth_payload=None, errors=["TOTP MFA is not properly set up for your account."])
+
+        elif selected_method in ["EMAIL", "SMS"]:
+            # Check Email/SMS OTP with purpose validation
+            if user.mfa_otp and user.mfa_otp_expires_at and timezone.now() < user.mfa_otp_expires_at:
+                if verify_otp(otp_code, user, purpose='mfa_login'):
+                    is_valid = True
+                    logger.info(f"{selected_method} OTP verification successful for user {user.email}")
+                    # Note: verify_otp already invalidates the OTP on success
+                else:
+                    logger.warning(f"{selected_method} OTP verification failed for user {user.email}")
+            else:
+                return cls(auth_payload=None, errors=["No valid OTP found. Please request a new code."])
+        else:
+            return cls(auth_payload=None, errors=["Invalid MFA method in token."])
 
         if not is_valid:
             logger.warning(f"MFA verification failed for user {user.email}: Invalid OTP code.")

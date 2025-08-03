@@ -36,6 +36,7 @@ from .mutations.mfa import (
     UpdatePhoneNumberMutation,
     RemovePhoneNumberMutation,
     ResendPhoneVerificationMutation,
+    SelectMfaMethodMutation,
 )
 from .mutations.verification import (
     VerifyEmailMutation,
@@ -92,6 +93,9 @@ class UserMutation(graphene.ObjectType):
     initiate_sms_mfa_setup = InitiateSmsMfaSetupMutation.Field()
     verify_sms_mfa_setup = VerifySmsMfaSetupMutation.Field()
     disable_sms_mfa = DisableSmsMfaMutation.Field()
+
+    # MFA Method Selection
+    select_mfa_method = SelectMfaMethodMutation.Field(description="Selects MFA method for current login session and sends OTP if needed.")
 
     # Phone Management
     add_phone_number = AddPhoneNumberMutation.Field(description="Adds a phone number and sends a verification code.")
