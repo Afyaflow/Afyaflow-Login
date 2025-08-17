@@ -25,8 +25,8 @@ def send_templated_email(recipient: str, template_id: str, context: dict):
         return False
 
     mutation = """
-        mutation SendTemplatedEmail($recipient: String!, $templateId: String!, $contextJson: String!) {
-            sendTemplatedEmail(recipient: $recipient, templateId: $templateId, contextJson: $contextJson) {
+        mutation SendTemplatedEmail($recipient: String!, $templateId: String!, $contextJson: String!, $serviceName: String!) {
+            sendTemplatedEmail(recipient: $recipient, templateId: $templateId, contextJson: $contextJson, serviceName: $serviceName) {
                 success
                 message
             }
@@ -36,7 +36,8 @@ def send_templated_email(recipient: str, template_id: str, context: dict):
     variables = {
         'recipient': recipient,
         'templateId': template_id,
-        'contextJson': json.dumps(context)
+        'contextJson': json.dumps(context),
+        'serviceName': 'auth-service'
     }
 
     # Import here to avoid circular imports
