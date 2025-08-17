@@ -162,6 +162,24 @@ class User(AbstractUser):
         """Check if user should be prompted to add a real email."""
         return not self.has_real_email and self.phone_number
 
+    @property
+    def display_name(self):
+        """Get a display name for the user, handling cases where names might be empty."""
+        if self.first_name and self.last_name:
+            return f"{self.first_name} {self.last_name}"
+        elif self.first_name:
+            return self.first_name
+        elif self.last_name:
+            return self.last_name
+        else:
+            # Fallback to email or phone for patients without names
+            if self.has_real_email:
+                return self.email.split('@')[0]  # Use email username part
+            elif self.phone_number:
+                return f"User {self.phone_number[-4:]}"  # Use last 4 digits of phone
+            else:
+                return f"User {str(self.id)[:8]}"  # Use first 8 chars of UUID
+
     # User type helper methods
     def is_patient(self):
         """Check if user is a patient (uses passwordless authentication)."""

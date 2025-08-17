@@ -130,12 +130,26 @@ The service supports three MFA methods:
 
 ### MFA Login Flow
 
-When MFA is enabled, login becomes a two-step process:
+When MFA is enabled, login becomes a smart two-step process with auto-send functionality:
 
+#### **Smart Auto-Send Flow (Recommended)**
 ```
-1. login(email, password) → Returns mfaRequired: true, mfaToken
+1. login(email, password) → Auto-sends OTP for recommended method + returns mfaRequired: true, mfaToken, mfaOtpSent: true
 2. verifyMfa(mfaToken, otpCode) → Returns access + refresh tokens
 ```
+
+#### **Method Selection Flow (Multiple Methods)**
+```
+1. login(email, password) → Returns mfaRequired: true, mfaToken, enabledMfaMethods
+2. selectMfaMethod(mfaToken, method) → Sends OTP + returns updated mfaToken
+3. verifyMfa(mfaToken, otpCode) → Returns access + refresh tokens
+```
+
+#### **Key Features:**
+- **Single Method Users**: OTP automatically sent to their enabled method (EMAIL/SMS)
+- **Multiple Method Users**: OTP sent to recommended method (TOTP > EMAIL > SMS) with option to switch
+- **TOTP Users**: No OTP sent, proceed directly to verification
+- **Fallback Support**: If auto-send fails, users can manually select method
 
 ---
 
@@ -190,6 +204,8 @@ type AuthPayload {
   mfaRequired: Boolean!
   mfaToken: String
   enabledMfaMethods: [String]
+  recommendedMfaMethod: String  # Most secure method available
+  mfaOtpSent: Boolean  # True if OTP was automatically sent
   organizationMemberships: [OrganizationMembership]
 
   # Additional context for dual-role users
@@ -316,13 +332,19 @@ mutation LoginUser {
 
 ### verifyMfa
 
-Completes MFA verification during login.
+Completes MFA verification during login with enhanced method support.
 
 **Arguments:**
 - `mfaToken: String!` - Short-lived MFA token from login
 - `otpCode: String!` - 6-digit OTP code
+- `method: String` - Optional MFA method (TOTP, EMAIL, SMS). Auto-detected if not provided.
 
 **Returns:** `AuthPayload`, `errors: [String]`
+
+**Enhanced Features:**
+- **Auto-detection**: Method automatically determined for single-method users
+- **Method validation**: Ensures OTP matches the specified/detected method
+- **Backward compatibility**: Works with existing selectMfaMethod flow
 
 ```graphql
 mutation VerifyMFA {
@@ -332,6 +354,44 @@ mutation VerifyMFA {
       accessToken
       refreshToken
     }
+    errors
+  }
+}
+
+# With explicit method (optional)
+mutation VerifyMFAWithMethod {
+  verifyMfa(mfaToken: "mfa_token_here", otpCode: "123456", method: "EMAIL") {
+    authPayload {
+      user { id email }
+      accessToken
+      refreshToken
+    }
+    errors
+  }
+}
+```
+
+### selectMfaMethod
+
+Allows users to select a specific MFA method when multiple methods are available or to switch from the auto-sent method.
+
+**Arguments:**
+- `mfaToken: String!` - MFA token from login
+- `selectedMethod: String!` - Method to use (TOTP, EMAIL, SMS)
+
+**Returns:** `ok: Boolean`, `message: String`, `updatedMfaToken: String`, `errors: [String]`
+
+**Use Cases:**
+- **Multiple methods available**: User wants to choose different method than recommended
+- **Auto-send failed**: Fallback when automatic OTP sending fails
+- **User preference**: User prefers different method than auto-selected
+
+```graphql
+mutation SelectMethod {
+  selectMfaMethod(mfaToken: "mfa_token_here", selectedMethod: "SMS") {
+    ok
+    message
+    updatedMfaToken  # Use this token for verifyMfa
     errors
   }
 }
@@ -1308,28 +1368,106 @@ The phone number management system provides complete lifecycle management:
 - **Automatic Disabling**: SMS MFA disabled when phone number removed/changed
 - **Re-enable After Verification**: SMS MFA can be re-enabled after new number verified
 
-### MFA Login Flow
+### Enhanced MFA Login Flow Examples
 
+#### **Single Method User (Auto-Send)**
 ```graphql
-# 1. Initial login
+# 1. Login - OTP automatically sent to user's email
 mutation {
   login(email: "user@example.com", password: "password") {
     authPayload {
-      mfaRequired
-      mfaToken
-      enabledMfaMethods  # ["TOTP", "SMS", "EMAIL"]
+      mfaRequired          # true
+      mfaToken            # "eyJ..."
+      enabledMfaMethods   # ["EMAIL"]
+      recommendedMfaMethod # "EMAIL"
+      mfaOtpSent          # true - OTP already sent!
     }
     errors
   }
 }
 
-# 2. Complete MFA (if required)
+# 2. Verify OTP (no method selection needed)
 mutation {
   verifyMfa(mfaToken: "mfa_token", otpCode: "123456") {
     authPayload {
       accessToken
       refreshToken
     }
+    errors
+  }
+}
+```
+
+#### **Multiple Methods User (Smart Auto-Send)**
+```graphql
+# 1. Login - OTP sent to most secure method (TOTP > EMAIL > SMS)
+mutation {
+  login(email: "user@example.com", password: "password") {
+    authPayload {
+      mfaRequired          # true
+      mfaToken            # "eyJ..."
+      enabledMfaMethods   # ["TOTP", "EMAIL", "SMS"]
+      recommendedMfaMethod # "TOTP"
+      mfaOtpSent          # false (TOTP doesn't need OTP)
+    }
+    errors
+  }
+}
+
+# 2a. Use TOTP (recommended)
+mutation {
+  verifyMfa(mfaToken: "mfa_token", otpCode: "123456", method: "TOTP") {
+    authPayload { accessToken refreshToken }
+    errors
+  }
+}
+
+# 2b. OR switch to different method
+mutation {
+  selectMfaMethod(mfaToken: "mfa_token", selectedMethod: "EMAIL") {
+    ok
+    message              # "Verification code sent to your email"
+    updatedMfaToken
+    errors
+  }
+}
+
+# 3. Verify with selected method
+mutation {
+  verifyMfa(mfaToken: "updated_mfa_token", otpCode: "654321") {
+    authPayload { accessToken refreshToken }
+    errors
+  }
+}
+```
+
+#### **Legacy Flow (Still Supported)**
+```graphql
+# 1. Login
+mutation {
+  login(email: "user@example.com", password: "password") {
+    authPayload {
+      mfaRequired
+      mfaToken
+      enabledMfaMethods
+    }
+    errors
+  }
+}
+
+# 2. Select method (if multiple available)
+mutation {
+  selectMfaMethod(mfaToken: "mfa_token", selectedMethod: "SMS") {
+    ok
+    updatedMfaToken
+    errors
+  }
+}
+
+# 3. Verify
+mutation {
+  verifyMfa(mfaToken: "updated_mfa_token", otpCode: "123456") {
+    authPayload { accessToken refreshToken }
     errors
   }
 }
@@ -1388,8 +1526,9 @@ mutation {
 
 #### Authentication & Registration
 - `register` - User registration (firstName/lastName required, userType optional)
-- `login` - User login with optional MFA
-- `verifyMfa` - Complete MFA verification
+- `login` - User login with smart MFA auto-send
+- `verifyMfa` - Complete MFA verification with optional method parameter
+- `selectMfaMethod` - Select specific MFA method or switch methods
 - `refreshToken` - Get new access token
 - `logout` - Invalidate refresh token
 - `getScopedAccessToken` - Get organization-scoped token
@@ -1487,6 +1626,13 @@ mutation {
 - **User type validation** and appropriate token signing
 - **Comprehensive email management** for all user types
 
+### Smart MFA Auto-Send System
+- **Automatic OTP delivery** for single-method users
+- **Smart method recommendation** (TOTP > EMAIL > SMS priority)
+- **Seamless user experience** with minimal steps
+- **Method switching capability** for power users
+- **Backward compatibility** with existing flows
+
 ---
 
-*This documentation reflects the current implementation with all recent enhancements including gateway compliance, patient passwordless authentication, dual-role support, and enhanced JWT security. For the most up-to-date schema, use GraphQL introspection or the GraphiQL interface.*
+*This documentation reflects the current implementation with all recent enhancements including gateway compliance, patient passwordless authentication, dual-role support, enhanced JWT security, and the new smart MFA auto-send system. For the most up-to-date schema, use GraphQL introspection or the GraphiQL interface.*

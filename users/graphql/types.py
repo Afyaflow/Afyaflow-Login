@@ -7,6 +7,7 @@ class UserType(DjangoObjectType):
     totp_mfa_enabled = graphene.Boolean(source='mfa_totp_setup_complete', description="True if TOTP MFA is configured and verified.")
     sms_mfa_enabled = graphene.Boolean(source='mfa_sms_enabled', description="True if SMS MFA is enabled.")
     email_mfa_enabled = graphene.Boolean(source='mfa_email_enabled', description="True if Email MFA is enabled.")
+    display_name = graphene.String(source='display_name', description="Display name for the user, handling cases where names might be empty.")
 
     class Meta:
         model = User
