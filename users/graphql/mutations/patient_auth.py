@@ -295,12 +295,9 @@ class CompletePatientAuthMutation(graphene.Mutation):
                     return cls(auth_payload=None, errors=["Verification code has expired."])
                 
                 # Create new patient user
-                if not first_name or not last_name:
-                    return cls(auth_payload=None, errors=["First name and last name are required for new patients."])
-                
                 user_data = {
-                    'first_name': first_name.strip(),
-                    'last_name': last_name.strip(),
+                    'first_name': first_name.strip() if first_name else '',
+                    'last_name': last_name.strip() if last_name else '',
                     'user_type': 'patient',
                     'is_active': True
                 }
